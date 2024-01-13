@@ -123,7 +123,7 @@ end
 ---@param stats table The statistical metrics to format.
 ---@param unit string The unit of measurement for the metrics.
 ---@return string txt A formatted string representing the statistical metrics.
-function format_stats(stats, unit)
+local function format_stats(stats, unit)
    return string.format(
       "%.8f %s ± %.8f %s per run (mean ± std. dev. of %d runs)",
       stats.mean,
