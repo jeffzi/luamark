@@ -16,7 +16,7 @@ else
 end
 
 description = {
-   summary = "Human-friendly Lua code analysis powered by Lua Language Server.",
+   summary = "A lightweight, portable microbenchmarking library.",
    detailed = [[
       LuaMark is a portable microbenchmarking library for Lua, offering precise measurement of
       execution time and memory usage.
