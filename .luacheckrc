@@ -1,2 +1,5 @@
 std = "min"
-include_files = {"src"}
+include_files = { "src" }
+globals = {
+   "now",
+}

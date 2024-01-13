@@ -1,5 +1,20 @@
-local socket = require("socket")
-local now = socket.gettime
+now = nil
+local has_posix, posix = pcall(require, "posix.time")
+
+-- clock_gettime is not defined on MacOS
+if has_posix and posix.clock_gettime then
+   now = function()
+      local s, ns = posix.clock_gettime(posix.CLOCK_MONOTONIC)
+      return s + ns / 1000000000
+   end
+else
+   local has_socket, socket = pcall(require, "socket")
+   if has_socket then
+      now = socket.gettime
+   else
+      now = os.clock
+   end
+end
 
 ---@class luamark
 local luamark = {}
