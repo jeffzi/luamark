@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/sumneko/vscode-lua/master/setting/schema.json",
+  "runtime.version": "Lua 5.1",
+  "indent_style": "space",
+  "indent_size": "3",
+  "workspace.ignoreDir": [".vscode"],
+  "workspace.checkThirdParty": false,
+  "workspace.library": [],
+  "diagnostics": {
+    "globals": [],
+    "disable": ["lowercase-global", "redefined-local", "undefined-global"]
+  }
+}
