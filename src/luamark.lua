@@ -1,21 +1,32 @@
 local socket = require("socket")
-local time = socket.gettime
+local now = socket.gettime
 
----@class benchmark
-local benchmark = {}
+---@class M
+local M = {}
 
+--- Performs a warm-up for a given function by running it a specified number of times.
+--- This helps in preparing the system for the actual M.
+---@param func function The function to warm up.
+---@param runs number The number of times to run the function.
 local function warmup(func, runs)
    for _ = 1, runs do
       func()
    end
 end
 
+--- Measures the time taken to execute a function once.
+---@param func function The function to measure.
+---@return number elapsed The time taken to execute the function.
 local function measure_time(func)
-   local start = time()
+   local start = now()
    func()
-   return time() - start
+   return now() - start
 end
 
+--- Measures the memory used by a function.
+--- Performs garbage collection before and after the function call to measure the memory usage accurately.
+---@param func function The function to measure.
+---@return number memory_used The amount of memory used by the function (in kilobytes).
 local function measure_memory(func)
    collectgarbage("collect")
    collectgarbage("stop")
@@ -26,13 +37,14 @@ local function measure_memory(func)
    return memory_used
 end
 
---- Benchmark function with raw values subtables
----@param func function
----@param runs number
----@param warmup_runs number The number of warm-up iterations performed before the actual benchmark.
---- These are used to estimate the timing overhead as well as spinning up the processor from any
---- sleep or idle states it might be in.
----@return table
+--- Runs a M on a function using a specified measurement method.
+--- Collects and returns raw values from multiple runs of the function.
+---@param func function The function to M.
+---@param measure function The measurement function to use (e.g., measure_time or measure_memory).
+---@param runs number The number of times to run the M.
+---@param warmup_runs number The number of warm-up iterations performed before the actual M.
+---@param disable_gc boolean Whether to disable garbage collection during the M.
+---@return table samples A table of raw values from each run of the M.
 local function run_benchmark(func, measure, runs, warmup_runs, disable_gc)
    warmup_runs = warmup_runs or 10
    warmup(func, warmup_runs)
@@ -56,21 +68,30 @@ local function run_benchmark(func, measure, runs, warmup_runs, disable_gc)
    return samples
 end
 
----comment
----@param func any
----@param runs any
----@param warmup_runs any
----@param disable_gc any
----@return table
-function benchmark.timeit(func, runs, warmup_runs, disable_gc)
+--- Benchmarks a function for execution time.
+---@param func function The function to M.
+---@param runs number The number of times to run the M.
+---@param warmup_runs number The number of warm-up iterations before the M.
+---@param disable_gc boolean Whether to disable garbage collection during the M.
+---@return table samples A table of time measurements for each run.
+function M.timeit(func, runs, warmup_runs, disable_gc)
    return run_benchmark(func, measure_time, runs, warmup_runs, disable_gc)
 end
 
-function benchmark.memit(func, runs, warmup_runs)
-   return run_benchmark(func, measure_memory, runs, warmup_runs)
+--- Benchmarks a function for memory usage.
+---@param func function The function to M.
+---@param runs number The number of times to run the M.
+---@param warmup_runs number The number of warm-up iterations before the M.
+---@return table samples A table of memory usage measurements for each run.
+function M.memit(func, runs, warmup_runs)
+   return run_benchmark(func, measure_memory, runs, warmup_runs, false)
 end
 
-function benchmark.calculate_stats(samples)
+--- Calculates statistical metrics from M samples.
+--- Includes count, min, max, mean, and standard deviation.
+---@param samples table The table of raw values from timeit or memit.
+---@return table stats A table containing statistical metrics.
+function M.calculate_stats(samples)
    local stats = {}
 
    stats.count = #samples
@@ -96,10 +117,11 @@ function benchmark.calculate_stats(samples)
    return stats
 end
 
----@param stats any
----@param unit any
----@return string
-function benchmark.format_stats(stats, unit)
+--- Formats the statistical metrics into a readable string.
+---@param stats table The statistical metrics to format.
+---@param unit string The unit of measurement for the metrics.
+---@return string txt A formatted string representing the statistical metrics.
+function M.format_stats(stats, unit)
    return string.format(
       "%.8f %s ± %.8f %s per run (mean ± std. dev. of %d runs)",
       stats.mean,
@@ -110,4 +132,4 @@ function benchmark.format_stats(stats, unit)
    )
 end
 
-return benchmark
+return M
