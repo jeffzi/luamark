@@ -52,6 +52,53 @@ local function measure_memory(func)
    return memory_used
 end
 
+--- Formats the statistical metrics into a readable string.
+---@param stats table The statistical metrics to format.
+---@param unit string The unit of measurement for the metrics.
+---@return string txt A formatted string representing the statistical metrics.
+local function format_stats(stats, unit)
+   local decimals = unit == "s" and 6 or 4
+   local template = string.format("%%.%df%%s ± %%.%df%%s per run", decimals, decimals)
+
+   return string.format(template, stats.mean, unit, stats.stddev, unit)
+end
+
+--- Calculates statistical metrics from timeit or memit samples..
+--- Includes count, min, max, mean, and standard deviation.
+---@param samples table The table of raw values from timeit or memit.
+---@return table stats A table containing statistical metrics.
+local function calculate_stats(samples, unit)
+   local stats = {}
+
+   stats.count = #samples
+
+   local min, max, total = 2 ^ 1023, 0, 0
+   for i = 1, stats.count do
+      local sample = samples[i]
+      total = total + sample
+      min = math.min(sample, min)
+      max = math.max(sample, max)
+   end
+
+   stats.min = min
+   stats.max = max
+   stats.mean = total / stats.count
+
+   local sum_of_squares = 0
+   for _, sample in ipairs(samples) do
+      sum_of_squares = sum_of_squares + (sample - stats.mean) ^ 2
+   end
+   stats.stddev = math.sqrt(sum_of_squares / (stats.count - 1))
+
+   setmetatable(stats, {
+      __tostring = function(self)
+         return format_stats(self, unit)
+      end,
+   })
+
+   return stats
+end
+
 --- Runs a benchmark on a function using a specified measurement method.
 --- Collects and returns raw values from multiple runs of the function.
 ---@param func function The function to luamark.
@@ -80,7 +127,7 @@ local function run_benchmark(func, measure, runs, warmup_runs, disable_gc)
       collectgarbage("restart")
    end
 
-   return samples
+   return calculate_stats(samples, measure == measure_memory and "kb" or "s")
 end
 
 --- Benchmarks a function for execution time.
@@ -102,65 +149,6 @@ end
 ---@return table samples A table of memory usage measurements for each run.
 function luamark.memit(func, runs, warmup_runs)
    return run_benchmark(func, measure_memory, runs, warmup_runs, false)
-end
-
---- Calculates statistical metrics from timeit or memit samples..
---- Includes count, min, max, mean, and standard deviation.
----@param samples table The table of raw values from timeit or memit.
----@return table stats A table containing statistical metrics.
-function luamark.calculate_stats(samples)
-   local stats = {}
-
-   stats.count = #samples
-
-   local min, max, total = 2 ^ 1023, 0, 0
-   for i = 1, stats.count do
-      local sample = samples[i]
-      total = total + sample
-      min = math.min(sample, min)
-      max = math.max(sample, max)
-   end
-
-   stats.min = min
-   stats.max = max
-   stats.mean = total / stats.count
-
-   local sum_of_squares = 0
-   for _, sample in ipairs(samples) do
-      sum_of_squares = sum_of_squares + (sample - stats.mean) ^ 2
-   end
-   stats.stddev = math.sqrt(sum_of_squares / (stats.count - 1))
-
-   return stats
-end
-
---- Formats the statistical metrics into a readable string.
----@param stats table The statistical metrics to format.
----@param unit string The unit of measurement for the metrics.
----@return string txt A formatted string representing the statistical metrics.
-local function format_stats(stats, unit)
-   return string.format(
-      "%.8f %s ± %.8f %s per run (mean ± std. dev. of %d runs)",
-      stats.mean,
-      unit,
-      stats.stddev,
-      unit,
-      stats.count
-   )
-end
-
---- Formats the time statistics into a readable string.
----@param stats table The statistical metrics to format, specifically for time measurements.
----@return string A formatted string representing the time statistical metrics in seconds.
-function luamark.format_time_stats(stats)
-   return format_stats(stats, "s")
-end
-
---- Formats the memory statistics into a readable string.
----@param stats table The statistical metrics to format, specifically for memory measurements.
----@return string A formatted string representing the memory statistical metrics in kilobytes.
-function luamark.format_mem_stats(stats)
-   return format_stats(stats, "kb")
 end
 
 return luamark
