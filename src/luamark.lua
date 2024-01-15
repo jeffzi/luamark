@@ -170,9 +170,4 @@ function luamark.memit(func, runs, warmups)
    return run_benchmark(func, measure_memory, runs, warmups, false)
 end
 
-function luamark.benchmark(funcs, runs, warmups)
-   local time_stats = luamark.timeit(func, runs)
-   local mem_stats = luamark.memit(func, runs)
-end
-
 return luamark
