@@ -20,7 +20,7 @@ end
 local luamark = {}
 
 --- Performs a warm-up for a given function by running it a specified number of times.
---- This helps in preparing the system for the actual luamark.
+--- This helps in preparing the system for the actual benchmark.
 ---@param func function The function to warm up.
 ---@param runs number The number of times to run the function.
 local function warmup(func, runs)
@@ -58,6 +58,8 @@ end
 ---@return string txt A formatted string representing the statistical metrics.
 local function format_stats(stats, unit)
    local decimals = unit == "s" and 6 or 4
+   -- https://stackoverflow.com/questions/48258008/n-and-r-arguments-to-ipythons-timeit-magic/59543135#59543135
+   -- # 259 µs ± 4.87 µs per loop (mean ± std. dev. of 7 runs, 1000 loops each)
    local template = string.format("%%.%df%%s ± %%.%df%%s per run", decimals, decimals)
 
    return string.format(template, stats.mean, unit, stats.stddev, unit)
@@ -118,12 +120,12 @@ end
 
 --- Runs a benchmark on a function using a specified measurement method.
 --- Collects and returns raw values from multiple runs of the function.
----@param func function The function to luamark.
+---@param func function The function to benchmark.
 ---@param measure function The measurement function to use (e.g., measure_time or measure_memory).
----@param runs number The number of times to run the luamark.
----@param warmups number The number of warm-up iterations performed before the actual luamark.
----@param disable_gc boolean Whether to disable garbage collection during the luamark.
----@return table samples A table of raw values from each run of the luamark.
+---@param runs number The number of times to run the benchmark.
+---@param warmups number The number of warm-up iterations performed before the actual benchmark.
+---@param disable_gc boolean Whether to disable garbage collection during the benchmark.
+---@return table samples A table of raw values from each run of the benchmark.
 local function run_benchmark(func, measure, runs, warmups, disable_gc)
    warmups = warmups or 10
    warmup(func, warmups)
@@ -149,23 +151,28 @@ end
 
 --- Benchmarks a function for execution time.
 --- The time is represented in seconds.
----@param func function The function to luamark.
----@param runs number The number of times to run the luamark.
----@param warmup_runs number The number of warm-up iterations before the luamark.
----@param disable_gc boolean Whether to disable garbage collection during the luamark.
+---@param func function The function to benchmark.
+---@param runs number The number of times to run the benchmark.
+---@param warmups number The number of warm-up iterations before the benchmark.
+---@param disable_gc boolean Whether to disable garbage collection during the benchmark.
 ---@return table samples A table of time measurements for each run.
-function luamark.timeit(func, runs, warmup_runs, disable_gc)
-   return run_benchmark(func, measure_time, runs, warmup_runs, disable_gc)
+function luamark.timeit(func, runs, warmups, disable_gc)
+   return run_benchmark(func, measure_time, runs, warmups, disable_gc)
 end
 
 --- Benchmarks a function for memory usage.
 --- The memory usage is represented in kilobytes.
----@param func function The function to luamark.
----@param runs number The number of times to run the luamark.
----@param warmup_runs number The number of warm-up iterations before the luamark.
+---@param func function The function to benchmark.
+---@param runs number The number of times to run the benchmark.
+---@param warmups number The number of warm-up iterations before the benchmark.
 ---@return table samples A table of memory usage measurements for each run.
-function luamark.memit(func, runs, warmup_runs)
-   return run_benchmark(func, measure_memory, runs, warmup_runs, false)
+function luamark.memit(func, runs, warmups)
+   return run_benchmark(func, measure_memory, runs, warmups, false)
+end
+
+function luamark.benchmark(funcs, runs, warmups)
+   local time_stats = luamark.timeit(func, runs)
+   local mem_stats = luamark.memit(func, runs)
 end
 
 return luamark
