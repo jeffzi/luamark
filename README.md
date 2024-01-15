@@ -26,21 +26,18 @@ luamark = require("luamark")
 
 local function func()
    arr = {}
-   for i = 1, 100 do
+   for i = 1, 1000 do
       arr[i] = math.sin(i)
    end
 end
 
-local time_samples = luamark.timeit(func, 10)
-local mem_samples = luamark.memit(func, 10)
+local time_stats = luamark.timeit(func)
+local mem_stats = luamark.memit(func)
 
-local time_stats = luamark.calculate_stats(time_samples)
-local mem_stats = luamark.calculate_stats(mem_samples)
-
-print(luamark.format_time_stats(time_stats))
-print(luamark.format_mem_stats(mem_stats))
--- 0.00000560 s ± 0.00000072 s per run (mean ± std. dev. of 10 runs)
--- 2.06250000 kb ± 0.00000000 kb per run (mean ± std. dev. of 10 runs)
+print(time_stats)
+print(mem_stats)
+-- 0.000045s ± 0.000004s per run
+-- 16.0625kb ± 0.0000kb per run
 
 ```
 
