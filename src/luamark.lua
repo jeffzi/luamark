@@ -104,12 +104,12 @@ end
 ---@param func function The function to luamark.
 ---@param measure function The measurement function to use (e.g., measure_time or measure_memory).
 ---@param runs number The number of times to run the luamark.
----@param warmup_runs number The number of warm-up iterations performed before the actual luamark.
+---@param warmups number The number of warm-up iterations performed before the actual luamark.
 ---@param disable_gc boolean Whether to disable garbage collection during the luamark.
 ---@return table samples A table of raw values from each run of the luamark.
-local function run_benchmark(func, measure, runs, warmup_runs, disable_gc)
-   warmup_runs = warmup_runs or 10
-   warmup(func, warmup_runs)
+local function run_benchmark(func, measure, runs, warmups, disable_gc)
+   warmups = warmups or 10
+   warmup(func, warmups)
 
    disable_gc = disable_gc or false
    if disable_gc then
