@@ -99,6 +99,23 @@ local function calculate_stats(samples, unit)
    return stats
 end
 
+--- Determine the number of runs so that total time >= 1
+---@param func function The function to benchmark.
+---@return number runs The number of times to run the benchmark.
+local function find_optimal_runs(func)
+   local runs = 0
+   for exponent = 0, 6 do
+      runs = 10 ^ exponent
+      sec = measure_time(function()
+         warmup(func, runs)
+      end)
+      if sec >= 1 then
+         break
+      end
+   end
+   return runs
+end
+
 --- Runs a benchmark on a function using a specified measurement method.
 --- Collects and returns raw values from multiple runs of the function.
 ---@param func function The function to luamark.
@@ -117,7 +134,7 @@ local function run_benchmark(func, measure, runs, warmups, disable_gc)
       collectgarbage("stop")
    end
 
-   runs = runs or 100
+   runs = runs or find_optimal_runs(func)
    local samples = {}
    for run = 1, runs do
       samples[run] = measure(func)
