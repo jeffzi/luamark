@@ -22,10 +22,12 @@ local luamark = {}
 --- Performs a warm-up for a given function by running it a specified number of times.
 --- This helps in preparing the system for the actual benchmark.
 ---@param func function The function to warm up.
----@param iterations number The number of times to run the function.
-local function warmup(func, iterations)
-   for _ = 1, iterations do
-      func()
+---@param n number The number of times to run the function.
+local function rerun(func, n)
+   return function(...)
+      for _ = 1, n do
+         func(...)
+      end
    end
 end
 
@@ -108,9 +110,7 @@ local function find_optimal_iterations(func)
    local iterations = 0
    for exponent = 0, 6 do
       iterations = 10 ^ exponent
-      local sec = measure_time(function()
-         warmup(func, iterations)
-      end)
+      local sec = measure_time(rerun(func, iterations))
       if sec >= 0.1 then
          break
       end
@@ -122,28 +122,32 @@ end
 --- Collects and returns raw values from multiple iterations of the function.
 ---@param func function The function to benchmark.
 ---@param measure function The measurement function to use (e.g., measure_time or measure_memory).
----@param iterations number The number of times to run the benchmark.
+---@param rounds number The number of rounds, i.e. set of runs
 ---@param warmups number The number of warm-up iterations performed before the actual benchmark.
 ---@param disable_gc boolean Whether to disable garbage collection during the benchmark.
 ---@return table samples A table of raw values from each run of the benchmark.
-local function run_benchmark(func, measure, iterations, warmups, disable_gc)
+local function run_benchmark(func, measure, rounds, warmups, disable_gc)
    warmups = warmups or 10
-   warmup(func, warmups)
+   rerun(func, warmups)()
 
    disable_gc = disable_gc or false
-   if disable_gc then
-      collectgarbage("collect")
-      collectgarbage("stop")
-   end
+   rounds = rounds or 3
+   iterations = find_optimal_iterations(func)
+   print(iterations)
 
-   iterations = iterations or find_optimal_iterations(func)
    local samples = {}
-   for run = 1, iterations do
-      samples[run] = measure(func)
-   end
+   inner_loop = rerun(func, iterations)
+   for i = 1, rounds do
+      if disable_gc then
+         collectgarbage("collect")
+         collectgarbage("stop")
+      end
 
-   if disable_gc then
-      collectgarbage("restart")
+      samples[i] = measure(inner_loop) / iterations
+
+      if disable_gc then
+         collectgarbage("restart")
+      end
    end
 
    return calculate_stats(samples, measure == measure_memory and "kb" or "s")
