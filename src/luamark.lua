@@ -22,9 +22,9 @@ local luamark = {}
 --- Performs a warm-up for a given function by running it a specified number of times.
 --- This helps in preparing the system for the actual benchmark.
 ---@param func function The function to warm up.
----@param runs number The number of times to run the function.
-local function warmup(func, runs)
-   for _ = 1, runs do
+---@param iterations number The number of times to run the function.
+local function warmup(func, iterations)
+   for _ = 1, iterations do
       func()
    end
 end
@@ -59,7 +59,7 @@ end
 local function format_stats(stats, unit)
    local decimals = unit == "s" and 6 or 4
    -- https://stackoverflow.com/questions/48258008/n-and-r-arguments-to-ipythons-timeit-magic/59543135#59543135
-   -- # 259 µs ± 4.87 µs per loop (mean ± std. dev. of 7 runs, 1000 loops each)
+   -- # 259 µs ± 4.87 µs per loop (mean ± std. dev. of 7 iterations, 1000 loops each)
    local template = string.format("%%.%df%%s ± %%.%df%%s per run", decimals, decimals)
 
    return string.format(template, stats.mean, unit, stats.stddev, unit)
@@ -101,32 +101,32 @@ local function calculate_stats(samples, unit)
    return stats
 end
 
---- Determine the number of runs so that total time >= 1
+--- Determine the number of iterations so that total time >= 1
 ---@param func function The function to benchmark.
----@return number runs The number of times to run the benchmark.
-local function find_optimal_runs(func)
-   local runs = 0
+---@return number iterations The number of times to run the benchmark.
+local function find_optimal_iterations(func)
+   local iterations = 0
    for exponent = 0, 6 do
-      runs = 10 ^ exponent
-      sec = measure_time(function()
-         warmup(func, runs)
+      iterations = 10 ^ exponent
+      local sec = measure_time(function()
+         warmup(func, iterations)
       end)
-      if sec >= 1 then
+      if sec >= 0.1 then
          break
       end
    end
-   return runs
+   return iterations
 end
 
 --- Runs a benchmark on a function using a specified measurement method.
---- Collects and returns raw values from multiple runs of the function.
+--- Collects and returns raw values from multiple iterations of the function.
 ---@param func function The function to benchmark.
 ---@param measure function The measurement function to use (e.g., measure_time or measure_memory).
----@param runs number The number of times to run the benchmark.
+---@param iterations number The number of times to run the benchmark.
 ---@param warmups number The number of warm-up iterations performed before the actual benchmark.
 ---@param disable_gc boolean Whether to disable garbage collection during the benchmark.
 ---@return table samples A table of raw values from each run of the benchmark.
-local function run_benchmark(func, measure, runs, warmups, disable_gc)
+local function run_benchmark(func, measure, iterations, warmups, disable_gc)
    warmups = warmups or 10
    warmup(func, warmups)
 
@@ -136,9 +136,9 @@ local function run_benchmark(func, measure, runs, warmups, disable_gc)
       collectgarbage("stop")
    end
 
-   runs = runs or find_optimal_runs(func)
+   iterations = iterations or find_optimal_iterations(func)
    local samples = {}
-   for run = 1, runs do
+   for run = 1, iterations do
       samples[run] = measure(func)
    end
 
@@ -152,22 +152,22 @@ end
 --- Benchmarks a function for execution time.
 --- The time is represented in seconds.
 ---@param func function The function to benchmark.
----@param runs number The number of times to run the benchmark.
+---@param iterations number The number of times to run the benchmark.
 ---@param warmups number The number of warm-up iterations before the benchmark.
 ---@param disable_gc boolean Whether to disable garbage collection during the benchmark.
 ---@return table samples A table of time measurements for each run.
-function luamark.timeit(func, runs, warmups, disable_gc)
-   return run_benchmark(func, measure_time, runs, warmups, disable_gc)
+function luamark.timeit(func, iterations, warmups, disable_gc)
+   return run_benchmark(func, measure_time, iterations, warmups, disable_gc)
 end
 
 --- Benchmarks a function for memory usage.
 --- The memory usage is represented in kilobytes.
 ---@param func function The function to benchmark.
----@param runs number The number of times to run the benchmark.
+---@param iterations number The number of times to run the benchmark.
 ---@param warmups number The number of warm-up iterations before the benchmark.
 ---@return table samples A table of memory usage measurements for each run.
-function luamark.memit(func, runs, warmups)
-   return run_benchmark(func, measure_memory, runs, warmups, false)
+function luamark.memit(func, iterations, warmups)
+   return run_benchmark(func, measure_memory, iterations, warmups, false)
 end
 
 return luamark
