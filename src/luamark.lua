@@ -54,12 +54,9 @@ end
 ---@param func function The function to measure.
 ---@return number memory_used The amount of memory used by the function (in kilobytes).
 local function measure_memory(func)
-   collectgarbage("collect")
-   collectgarbage("stop")
    local start_memory = collectgarbage("count")
    func()
    local memory_used = collectgarbage("count") - start_memory
-   collectgarbage("restart")
    return memory_used
 end
 
