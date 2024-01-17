@@ -1,18 +1,27 @@
-now = nil
+local CALIBRATION_PRECISION = 5
+local MIN_ROUNDS = 5
+
+local LUA_MAX_INT = 2 ^ 1023
+
+local clock, clock_resolution
 local has_posix, posix = pcall(require, "posix.time")
 
 -- clock_gettime is not defined on MacOS
 if has_posix and posix.clock_gettime then
-   now = function()
+   clock_resolution = 1e-9 -- 1ns
+   clock = function()
       local s, ns = posix.clock_gettime(posix.CLOCK_MONOTONIC)
-      return s + ns / 1000000000
+      return s + ns / clock_resolution
    end
 else
    local has_socket, socket = pcall(require, "socket")
    if has_socket then
-      now = socket.gettime
+      clock = socket.gettime
+      clock_resolution = 1e-4 -- 10µs
    else
-      now = os.clock
+      -- Inconsistent across platforms: report real time on windows vs cpu time on linux
+      clock = os.clock
+      clock_resolution = 1e-3 -- 1ms
    end
 end
 
@@ -33,11 +42,11 @@ end
 
 --- Measures the time taken to execute a function once.
 ---@param func function The function to measure.
----@return number elapsed The time taken to execute the function.
+---@return number duration The time taken to execute the function.
 local function measure_time(func)
-   local start = now()
+   local start = clock()
    func()
-   return now() - start
+   return clock() - start
 end
 
 --- Measures the memory used by a function.
@@ -76,7 +85,7 @@ local function calculate_stats(samples, unit)
 
    stats.count = #samples
 
-   local min, max, total = 2 ^ 1023, 0, 0
+   local min, max, total = LUA_MAX_INT, 0, 0
    for i = 1, stats.count do
       local sample = samples[i]
       total = total + sample
@@ -103,16 +112,26 @@ local function calculate_stats(samples, unit)
    return stats
 end
 
---- Determine the number of iterations so that total time >= 1
+--- Determine the round parameters
 ---@param func function The function to benchmark.
----@return number iterations The number of times to run the benchmark.
-local function calibrate_iterations(func)
-   local iterations = 0
-   for exponent = 0, 6 do
-      iterations = 10 ^ exponent
-      local sec = measure_time(rerun(func, iterations))
-      if sec >= 0.1 then
+---@return number # Duration of a round.
+local function calibrate_round(func)
+   local min_time = clock_resolution * CALIBRATION_PRECISION
+   local iterations = 1
+   while true do
+      local repeated_func = rerun(func, iterations)
+      local duration = measure_time(repeated_func)
+      if duration >= min_time then
          break
+      end
+      if duration >= clock_resolution then
+         iterations = math.ceil(min_time * iterations / duration)
+         if iterations == 1 then
+            -- Nothing to calibrate anymore
+            break
+         end
+      else
+         iterations = iterations * 10
       end
    end
    return iterations
@@ -123,17 +142,15 @@ end
 ---@param func function The function to benchmark.
 ---@param measure function The measurement function to use (e.g., measure_time or measure_memory).
 ---@param rounds number The number of rounds, i.e. set of runs
----@param warmups number The number of warm-up iterations performed before the actual benchmark.
 ---@param disable_gc boolean Whether to disable garbage collection during the benchmark.
 ---@return table samples A table of raw values from each run of the benchmark.
-local function run_benchmark(func, measure, rounds, warmups, disable_gc)
-   warmups = warmups or 10
-   rerun(func, warmups)()
-
+local function run_benchmark(func, measure, rounds, disable_gc)
    disable_gc = disable_gc or true
-   rounds = rounds or 5
-   iterations = calibrate_iterations(func)
-   inner_loop = rerun(func, iterations)
+   rounds = rounds or MIN_ROUNDS
+   local iterations = calibrate_round(func)
+   local inner_loop = rerun(func, iterations)
+
+   inner_loop() -- warmup 1 round
 
    local samples = {}
    for i = 1, rounds do
@@ -154,20 +171,18 @@ end
 --- The time is represented in seconds.
 ---@param func function The function to benchmark.
 ---@param rounds number The number of times to run the benchmark.
----@param warmups number The number of warm-up iterations before the benchmark.
 ---@return table samples A table of time measurements for each run.
-function luamark.timeit(func, rounds, warmups)
-   return run_benchmark(func, measure_time, rounds, warmups, true)
+function luamark.timeit(func, rounds)
+   return run_benchmark(func, measure_time, rounds, true)
 end
 
 --- Benchmarks a function for memory usage.
 --- The memory usage is represented in kilobytes.
 ---@param func function The function to benchmark.
 ---@param rounds number The number of times to run the benchmark.
----@param warmups number The number of warm-up iterations before the benchmark.
 ---@return table samples A table of memory usage measurements for each run.
-function luamark.memit(func, rounds, warmups)
-   return run_benchmark(func, measure_memory, rounds, warmups, false)
+function luamark.memit(func, rounds)
+   return run_benchmark(func, measure_memory, rounds, false)
 end
 
 return luamark
