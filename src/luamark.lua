@@ -1,7 +1,10 @@
+---@class luamark
+local luamark = {}
+
 local CALIBRATION_PRECISION = 5
 local MIN_ROUNDS = 5
 
-local LUA_MAX_INT = 2 ^ 1023
+local MAX_INT = 2 ^ 1023
 
 local clock, clock_resolution
 local has_posix, posix = pcall(require, "posix.time")
@@ -24,9 +27,6 @@ else
       clock_resolution = 1e-3 -- 1ms
    end
 end
-
----@class luamark
-local luamark = {}
 
 --- Performs a warm-up for a given function by running it a specified number of times.
 --- This helps in preparing the system for the actual benchmark.
@@ -68,9 +68,9 @@ local function format_stats(stats, unit)
    local decimals = unit == "s" and 6 or 4
    -- https://stackoverflow.com/questions/48258008/n-and-r-arguments-to-ipythons-timeit-magic/59543135#59543135
    -- # 259 µs ± 4.87 µs per loop (mean ± std. dev. of 7 iterations, 1000 loops each)
-   local template = string.format("%%.%df%%s ± %%.%df%%s per run", decimals, decimals)
+   local sampleslate = string.format("%%.%df%%s ± %%.%df%%s per run", decimals, decimals)
 
-   return string.format(template, stats.mean, unit, stats.stddev, unit)
+   return string.format(sampleslate, stats.mean, unit, stats.stddev, unit)
 end
 
 --- Calculates statistical metrics from timeit or memit samples..
@@ -82,23 +82,36 @@ local function calculate_stats(samples, unit)
 
    stats.count = #samples
 
-   local min, max, total = LUA_MAX_INT, 0, 0
+   table.sort(samples)
+   -- Calculate median
+   if math.fmod(#samples, 2) == 0 then
+      -- If even or odd #samples -> averages of the 2 elements at the center
+      stats.median = (samples[#samples / 2] + samples[(#samples / 2) + 1]) / 2
+   else
+      -- middle element
+      stats.median = samples[math.ceil(#samples / 2)]
+   end
+
+   stats.total = 0
+   local min, max = MAX_INT, 0
    for i = 1, stats.count do
       local sample = samples[i]
-      total = total + sample
+      stats.total = stats.total + sample
       min = math.min(sample, min)
       max = math.max(sample, max)
    end
 
    stats.min = min
    stats.max = max
-   stats.mean = total / stats.count
+   stats.mean = stats.total / stats.count
 
    local sum_of_squares = 0
    for _, sample in ipairs(samples) do
       sum_of_squares = sum_of_squares + (sample - stats.mean) ^ 2
    end
    stats.stddev = math.sqrt(sum_of_squares / (stats.count - 1))
+
+   stats["stats.total"] = stats.total
 
    setmetatable(stats, {
       __tostring = function(self)
@@ -140,7 +153,7 @@ end
 ---@param measure function The measurement function to use (e.g., measure_time or measure_memory).
 ---@param rounds number The number of rounds, i.e. set of runs
 ---@param disable_gc boolean Whether to disable garbage collection during the benchmark.
----@return table samples A table of raw values from each run of the benchmark.
+---@return table # A table containing the results of the benchmark .
 local function run_benchmark(func, measure, rounds, disable_gc)
    disable_gc = disable_gc or true
    rounds = rounds or MIN_ROUNDS
@@ -149,6 +162,7 @@ local function run_benchmark(func, measure, rounds, disable_gc)
 
    inner_loop() -- warmup 1 round
 
+   local timestamp = os.date("!%Y-%m-%d %H:%M:%SZ")
    local samples = {}
    for i = 1, rounds do
       collectgarbage("collect")
@@ -161,14 +175,18 @@ local function run_benchmark(func, measure, rounds, disable_gc)
       collectgarbage("restart")
    end
 
-   return calculate_stats(samples, measure == measure_memory and "kb" or "s")
+   local results = calculate_stats(samples, measure == measure_memory and "kb" or "s")
+   results.rounds = rounds
+   results.iterations = iterations
+   results.timestamp = timestamp
+   return results
 end
 
 --- Benchmarks a function for execution time.
 --- The time is represented in seconds.
 ---@param func function The function to benchmark.
 ---@param rounds number The number of times to run the benchmark.
----@return table samples A table of time measurements for each run.
+---@return table results A table of time measurements for each run.
 function luamark.timeit(func, rounds)
    return run_benchmark(func, measure_time, rounds, true)
 end
@@ -177,7 +195,7 @@ end
 --- The memory usage is represented in kilobytes.
 ---@param func function The function to benchmark.
 ---@param rounds number The number of times to run the benchmark.
----@return table samples A table of memory usage measurements for each run.
+---@return table results A table of memory usage measurements for each run.
 function luamark.memit(func, rounds)
    return run_benchmark(func, measure_memory, rounds, false)
 end
