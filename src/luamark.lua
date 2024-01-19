@@ -29,9 +29,9 @@ else
 end
 
 --- Return a function which runs `func` `n` times when called.
----@param func function A function with no arguments.
+---@param func fun(any): any A zero-argument function.
 ---@param n number The number of times to run the function.
----@return function
+---@return fun(any): any
 local function rerun(func, n)
    return function(...)
       for _ = 1, n do
@@ -42,7 +42,7 @@ end
 
 --- Measures the time taken to execute a function once.
 ---@param func function The function to measure.
----@return number duration The time taken to execute the function.
+---@return number # The time taken to execute the function.
 local function measure_time(func)
    local start = clock()
    func()
@@ -51,7 +51,7 @@ end
 
 --- Measures the memory used by a function.
 ---@param func function The function to measure.
----@return number memory_used The amount of memory used by the function (in kilobytes).
+---@return number # The amount of memory used by the function (in kilobytes).
 local function measure_memory(func)
    local start_memory = collectgarbage("count")
    func()
@@ -59,9 +59,9 @@ local function measure_memory(func)
    return memory_used
 end
 
---- Calculates statistical metrics from timeit or memit samples..
+--- Calculates measurements from timeit or memit samples..
 ---@param samples table The table of raw measurements from timeit or memit.
----@return table stats A table containing statistical metrics.
+---@return table # A table of statistical measurements.
 local function calculate_stats(samples)
    local stats = {}
 
@@ -109,10 +109,10 @@ local function format_number(num, decimals)
    return string.format(" %." .. decimals .. "f", num):gsub("%.?0+$", "")
 end
 
---- Formats the statistical metrics into a readable string.
----@param stats table The statistical metrics to format.
----@param unit string The unit of measurement for the metrics.
----@return string txt A formatted string representing the statistical metrics.
+--- Formats statistical measurements into a readable string.
+---@param stats table The statistical measurements to format.
+---@param unit string The unit of measurement.
+---@return string # A formatted string representing the statistical metrics.
 local function format_stats(stats, unit, decimals)
    return string.format(
       "%s%s ±%s%s per round (%d rounds)",
