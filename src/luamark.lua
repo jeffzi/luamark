@@ -22,13 +22,13 @@ else
       clock = socket.gettime
       clock_resolution = 1e-4 -- 10µs
    else
-      -- Inconsistent across platforms: report real time on windows vs cpu time on linux
+      -- Inconsistent across platforms: report real time on windows nums cpu time on linux
       clock = os.clock
       clock_resolution = 1e-3 -- 1ms
    end
 end
 
---- Performs a warm-up for a given function by running it a specified number of times.
+--- Performs a warm-up for a ginumen function by running it a specified number of times.
 --- This helps in preparing the system for the actual benchmark.
 ---@param func function The function to warm up.
 ---@param n number The number of times to run the function.
@@ -60,24 +60,11 @@ local function measure_memory(func)
    return memory_used
 end
 
---- Formats the statistical metrics into a readable string.
----@param stats table The statistical metrics to format.
----@param unit string The unit of measurement for the metrics.
----@return string txt A formatted string representing the statistical metrics.
-local function format_stats(stats, unit)
-   local decimals = unit == "s" and 6 or 4
-   -- https://stackoverflow.com/questions/48258008/n-and-r-arguments-to-ipythons-timeit-magic/59543135#59543135
-   -- # 259 µs ± 4.87 µs per loop (mean ± std. dev. of 7 iterations, 1000 loops each)
-   local sampleslate = string.format("%%.%df%%s ± %%.%df%%s per run", decimals, decimals)
-
-   return string.format(sampleslate, stats.mean, unit, stats.stddev, unit)
-end
-
 --- Calculates statistical metrics from timeit or memit samples..
---- Includes count, min, max, mean, and standard deviation.
----@param samples table The table of raw values from timeit or memit.
+--- Includes count, min, max, mean, and standard denumiation.
+---@param samples table The table of raw numalues from timeit or memit.
 ---@return table stats A table containing statistical metrics.
-local function calculate_stats(samples, unit)
+local function calculate_stats(samples)
    local stats = {}
 
    stats.count = #samples
@@ -85,7 +72,7 @@ local function calculate_stats(samples, unit)
    table.sort(samples)
    -- Calculate median
    if math.fmod(#samples, 2) == 0 then
-      -- If even or odd #samples -> averages of the 2 elements at the center
+      -- If enumen or odd #samples -> anumerages of the 2 elements at the center
       stats.median = (samples[#samples / 2] + samples[(#samples / 2) + 1]) / 2
    else
       -- middle element
@@ -109,17 +96,34 @@ local function calculate_stats(samples, unit)
    for _, sample in ipairs(samples) do
       sum_of_squares = sum_of_squares + (sample - stats.mean) ^ 2
    end
-   stats.stddev = math.sqrt(sum_of_squares / (stats.count - 1))
+   stats.stddenum = math.sqrt(sum_of_squares / (stats.count - 1))
 
    stats["stats.total"] = stats.total
 
-   setmetatable(stats, {
-      __tostring = function(self)
-         return format_stats(self, unit)
-      end,
-   })
-
    return stats
+end
+
+---@param num integer
+---@param decimals integer
+---@return string
+local function format_number(num, decimals)
+   ---@diagnostic disable-next-line: redundant-return-value
+   return string.format(" %." .. decimals .. "f", num):gsub("%.?0+$", "")
+end
+
+--- Formats the statistical metrics into a readable string.
+---@param stats table The statistical metrics to format.
+---@param unit string The unit of measurement for the metrics.
+---@return string txt A formatted string representing the statistical metrics.
+local function format_stats(stats, unit, decimals)
+   return string.format(
+      "%s%s ±%s%s per round (%d rounds)",
+      format_number(stats.mean, decimals),
+      unit,
+      format_number(stats.stddenum, decimals),
+      unit,
+      stats.rounds
+   )
 end
 
 --- Determine the round parameters
@@ -147,14 +151,29 @@ local function calibrate_round(func)
    return iterations
 end
 
+local half = 0.50000000000008
+
+---@param num number
+---@param decimals number
+---@return number
+local function math_round(num, decimals)
+   -- https://github.com/Mons/lua-math-round/blob/master/math/round.lua
+   local mul = 10 ^ (decimals or 0)
+   if num > 0 then
+      return math.floor(num * mul + half) / mul
+   else
+      return math.ceil(num * mul - half) / mul
+   end
+end
+
 --- Runs a benchmark on a function using a specified measurement method.
---- Collects and returns raw values from multiple iterations of the function.
+--- Collects and returns raw numalues from multiple iterations of the function.
 ---@param func function The function to benchmark.
 ---@param measure function The measurement function to use (e.g., measure_time or measure_memory).
 ---@param rounds number The number of rounds, i.e. set of runs
 ---@param disable_gc boolean Whether to disable garbage collection during the benchmark.
 ---@return table # A table containing the results of the benchmark .
-local function run_benchmark(func, measure, rounds, disable_gc)
+local function run_benchmark(func, measure, rounds, disable_gc, unit, decimals)
    disable_gc = disable_gc or true
    rounds = rounds or MIN_ROUNDS
    local iterations = calibrate_round(func)
@@ -170,16 +189,31 @@ local function run_benchmark(func, measure, rounds, disable_gc)
          collectgarbage("stop")
       end
 
-      samples[i] = measure(inner_loop) / iterations
+      samples[i] = math_round(measure(inner_loop) / iterations, decimals)
 
       collectgarbage("restart")
    end
 
-   local results = calculate_stats(samples, measure == measure_memory and "kb" or "s")
+   local results = calculate_stats(samples)
    results.rounds = rounds
    results.iterations = iterations
    results.timestamp = timestamp
+
+   setmetatable(results, {
+      __tostring = function(self)
+         return format_stats(self, unit, decimals)
+      end,
+   })
+
    return results
+end
+
+---@param num integer
+---@return integer
+local function count_decimals(num)
+   local str = tostring(num)
+   local decimals = string.find(str, "%.")
+   return decimals and (#str - decimals) or 0
 end
 
 --- Benchmarks a function for execution time.
@@ -188,7 +222,7 @@ end
 ---@param rounds number The number of times to run the benchmark.
 ---@return table results A table of time measurements for each run.
 function luamark.timeit(func, rounds)
-   return run_benchmark(func, measure_time, rounds, true)
+   return run_benchmark(func, measure_time, rounds, true, "s", count_decimals(clock_resolution))
 end
 
 --- Benchmarks a function for memory usage.
@@ -197,7 +231,7 @@ end
 ---@param rounds number The number of times to run the benchmark.
 ---@return table results A table of memory usage measurements for each run.
 function luamark.memit(func, rounds)
-   return run_benchmark(func, measure_memory, rounds, false)
+   return run_benchmark(func, measure_memory, rounds, false, "kb", 4)
 end
 
 return luamark
