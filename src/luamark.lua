@@ -28,10 +28,10 @@ else
    end
 end
 
---- Performs a warm-up for a ginumen function by running it a specified number of times.
---- This helps in preparing the system for the actual benchmark.
----@param func function The function to warm up.
+--- Return a function which runs `func` `n` times when called.
+---@param func function A function with no arguments.
 ---@param n number The number of times to run the function.
+---@return function
 local function rerun(func, n)
    return function(...)
       for _ = 1, n do
@@ -50,7 +50,6 @@ local function measure_time(func)
 end
 
 --- Measures the memory used by a function.
---- Performs garbage collection before and after the function call to measure the memory usage accurately.
 ---@param func function The function to measure.
 ---@return number memory_used The amount of memory used by the function (in kilobytes).
 local function measure_memory(func)
@@ -61,8 +60,7 @@ local function measure_memory(func)
 end
 
 --- Calculates statistical metrics from timeit or memit samples..
---- Includes count, min, max, mean, and standard denumiation.
----@param samples table The table of raw numalues from timeit or memit.
+---@param samples table The table of raw measurements from timeit or memit.
 ---@return table stats A table containing statistical metrics.
 local function calculate_stats(samples)
    local stats = {}
@@ -167,7 +165,6 @@ local function math_round(num, decimals)
 end
 
 --- Runs a benchmark on a function using a specified measurement method.
---- Collects and returns raw numalues from multiple iterations of the function.
 ---@param func function The function to benchmark.
 ---@param measure function The measurement function to use (e.g., measure_time or measure_memory).
 ---@param rounds number The number of rounds, i.e. set of runs
@@ -216,18 +213,16 @@ local function count_decimals(num)
    return decimals and (#str - decimals) or 0
 end
 
---- Benchmarks a function for execution time.
---- The time is represented in seconds.
----@param func function The function to benchmark.
+--- Benchmarks a function for execution time. The time is represented in seconds.
+---@param func function A function with no arguments to benchmark.
 ---@param rounds number The number of times to run the benchmark.
 ---@return table results A table of time measurements for each run.
 function luamark.timeit(func, rounds)
    return run_benchmark(func, measure_time, rounds, true, "s", count_decimals(clock_resolution))
 end
 
---- Benchmarks a function for memory usage.
---- The memory usage is represented in kilobytes.
----@param func function The function to benchmark.
+--- Benchmarks a function for memory usage. The memory usage is represented in kilobytes.
+---@param func function A function with no arguments to benchmark.
 ---@param rounds number The number of times to run the benchmark.
 ---@return table results A table of memory usage measurements for each run.
 function luamark.memit(func, rounds)
