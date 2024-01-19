@@ -170,8 +170,7 @@ end
 ---@param rounds number The number of rounds, i.e. set of runs
 ---@param disable_gc boolean Whether to disable garbage collection during the benchmark.
 ---@return table # A table containing the results of the benchmark .
-local function run_benchmark(func, measure, rounds, disable_gc, unit, decimals)
-   disable_gc = disable_gc or true
+local function single_benchmark(func, measure, rounds, disable_gc, unit, decimals)
    rounds = rounds or MIN_ROUNDS
    local iterations = calibrate_round(func)
    local inner_loop = rerun(func, iterations)
@@ -205,6 +204,21 @@ local function run_benchmark(func, measure, rounds, disable_gc, unit, decimals)
    return results
 end
 
+---@param funcs (fun(): any)|({[string]: fun(): any}) A single zero-argument function or a table of zero-argument functions indexed by name.
+---@param ... any arguments that will be forwarded to `single_benchmark`.
+---@return {[string]:any}|{[string]:{[string]: any}} # A table of statistical measurements for the function(s) benchmarked, indexed by the function name if multiple functions were given.
+function benchmark(funcs, ...)
+   if type(funcs) == "function" then
+      return single_benchmark(funcs, ...)
+   end
+
+   local results = {}
+   for name, func in pairs(funcs) do
+      results[name] = single_benchmark(func, ...)
+   end
+   return results
+end
+
 ---@param num integer
 ---@return integer
 local function count_decimals(num)
@@ -214,19 +228,19 @@ local function count_decimals(num)
 end
 
 --- Benchmarks a function for execution time. The time is represented in seconds.
----@param func function A function with no arguments to benchmark.
----@param rounds number The number of times to run the benchmark.
----@return table results A table of time measurements for each run.
+---@param func (fun(): any)|({[string]: fun(): any}) A single zero-argument function or a table of zero-argument functions indexed by name.
+---@param rounds? number The number of times to run the benchmark. Defaults to a predetermined number if not provided.
+---@return {[string]:any}|{[string]:{[string]: any}} # A table of statistical measurements for the function(s) benchmarked, indexed by the function name if multiple functions were given.
 function luamark.timeit(func, rounds)
-   return run_benchmark(func, measure_time, rounds, true, "s", count_decimals(clock_resolution))
+   return benchmark(func, measure_time, rounds, true, "s", count_decimals(clock_resolution))
 end
 
 --- Benchmarks a function for memory usage. The memory usage is represented in kilobytes.
----@param func function A function with no arguments to benchmark.
----@param rounds number The number of times to run the benchmark.
----@return table results A table of memory usage measurements for each run.
+---@param func (fun(): any)|({[string]: fun(): any}) A single zero-argument function or a table of zero-argument functions indexed by name.
+---@param rounds? number The number of times to run the benchmark. Defaults to a predetermined number if not provided.
+---@return {[string]:any}|{[string]:{[string]: any}} # A table of statistical measurements for the function(s) benchmarked, indexed by the function name if multiple functions were given.
 function luamark.memit(func, rounds)
-   return run_benchmark(func, measure_memory, rounds, false, "kb", 4)
+   return benchmark(func, measure_memory, rounds, false, "kb", 4)
 end
 
 return luamark
