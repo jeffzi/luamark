@@ -1,3 +1,7 @@
+-- ----------------------------------------------------------------------------
+-- Constants
+-- ----------------------------------------------------------------------------
+
 ---@class luamark
 local luamark = {}
 
@@ -28,6 +32,33 @@ else
    end
 end
 
+-- ----------------------------------------------------------------------------
+-- Utils
+-- ----------------------------------------------------------------------------
+
+local half = 0.50000000000008
+
+---@param num number
+---@param decimals number
+---@return number
+local function math_round(num, decimals)
+   -- https://github.com/Mons/lua-math-round/blob/master/math/round.lua
+   local mul = 10 ^ (decimals or 0)
+   if num > 0 then
+      return math.floor(num * mul + half) / mul
+   else
+      return math.ceil(num * mul - half) / mul
+   end
+end
+
+---@param num integer
+---@return integer
+local function count_decimals(num)
+   local str = tostring(num)
+   local decimals = string.find(str, "%.")
+   return decimals and (#str - decimals) or 0
+end
+
 --- Return a function which runs `func` `n` times when called.
 ---@param func fun(any): any A zero-argument function.
 ---@param n number The number of times to run the function.
@@ -40,24 +71,42 @@ local function rerun(func, n)
    end
 end
 
---- Measures the time taken to execute a function once.
----@param func function The function to measure.
----@return number # The time taken to execute the function.
-local function measure_time(func)
-   local start = clock()
-   func()
-   return clock() - start
+-- ----------------------------------------------------------------------------
+-- I/O
+-- ----------------------------------------------------------------------------
+
+--- @param str string String to print
+--- @param ... any Arguments forwarded to `string.format`
+local function log(str, ...)
+   print(string.format(str, ...))
 end
 
---- Measures the memory used by a function.
----@param func function The function to measure.
----@return number # The amount of memory used by the function (in kilobytes).
-local function measure_memory(func)
-   local start_memory = collectgarbage("count")
-   func()
-   local memory_used = collectgarbage("count") - start_memory
-   return memory_used
+---@param num integer
+---@param decimals integer
+---@return string
+local function format_number(num, decimals)
+   ---@diagnostic disable-next-line: redundant-return-value
+   return string.format(" %." .. decimals .. "f", num):gsub("%.?0+$", "")
 end
+
+--- Formats statistical measurements into a readable string.
+---@param stats table The statistical measurements to format.
+---@param unit string The unit of measurement.
+---@return string # A formatted string representing the statistical metrics.
+local function format_stats(stats, unit, decimals)
+   return string.format(
+      "%s%s ±%s%s per round (%d rounds)",
+      format_number(stats.mean, decimals),
+      unit,
+      format_number(stats.stddenum, decimals),
+      unit,
+      stats.rounds
+   )
+end
+
+-- ----------------------------------------------------------------------------
+-- Statistics
+-- ----------------------------------------------------------------------------
 
 --- Calculates measurements from timeit or memit samples..
 ---@param samples table The table of raw measurements from timeit or memit.
@@ -101,27 +150,27 @@ local function calculate_stats(samples)
    return stats
 end
 
----@param num integer
----@param decimals integer
----@return string
-local function format_number(num, decimals)
-   ---@diagnostic disable-next-line: redundant-return-value
-   return string.format(" %." .. decimals .. "f", num):gsub("%.?0+$", "")
+-- ----------------------------------------------------------------------------
+-- Benchmark
+-- ----------------------------------------------------------------------------
+
+--- Measures the time taken to execute a function once.
+---@param func function The function to measure.
+---@return number # The time taken to execute the function.
+local function measure_time(func)
+   local start = clock()
+   func()
+   return clock() - start
 end
 
---- Formats statistical measurements into a readable string.
----@param stats table The statistical measurements to format.
----@param unit string The unit of measurement.
----@return string # A formatted string representing the statistical metrics.
-local function format_stats(stats, unit, decimals)
-   return string.format(
-      "%s%s ±%s%s per round (%d rounds)",
-      format_number(stats.mean, decimals),
-      unit,
-      format_number(stats.stddenum, decimals),
-      unit,
-      stats.rounds
-   )
+--- Measures the memory used by a function.
+---@param func function The function to measure.
+---@return number # The amount of memory used by the function (in kilobytes).
+local function measure_memory(func)
+   local start_memory = collectgarbage("count")
+   func()
+   local memory_used = collectgarbage("count") - start_memory
+   return memory_used
 end
 
 --- Determine the round parameters
@@ -147,21 +196,6 @@ local function calibrate_round(func)
       end
    end
    return iterations
-end
-
-local half = 0.50000000000008
-
----@param num number
----@param decimals number
----@return number
-local function math_round(num, decimals)
-   -- https://github.com/Mons/lua-math-round/blob/master/math/round.lua
-   local mul = 10 ^ (decimals or 0)
-   if num > 0 then
-      return math.floor(num * mul + half) / mul
-   else
-      return math.ceil(num * mul - half) / mul
-   end
 end
 
 --- Runs a benchmark on a function using a specified measurement method.
@@ -217,14 +251,6 @@ function benchmark(funcs, ...)
       results[name] = single_benchmark(func, ...)
    end
    return results
-end
-
----@param num integer
----@return integer
-local function count_decimals(num)
-   local str = tostring(num)
-   local decimals = string.find(str, "%.")
-   return decimals and (#str - decimals) or 0
 end
 
 --- Benchmarks a function for execution time. The time is represented in seconds.
