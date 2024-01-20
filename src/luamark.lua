@@ -75,12 +75,6 @@ end
 -- I/O
 -- ----------------------------------------------------------------------------
 
---- @param str string String to print
---- @param ... any Arguments forwarded to `string.format`
-local function log(str, ...)
-   print(string.format(str, ...))
-end
-
 ---@param num integer
 ---@param decimals integer
 ---@return string
