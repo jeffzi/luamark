@@ -161,10 +161,10 @@ end
 ---@param func fun(): any The zero-arg function to measure.
 ---@return number # The amount of memory used by the function (in kilobytes).
 function luamark.measure_memory(func)
+   collectgarbage("collect")
    local start_memory = collectgarbage("count")
    func()
-   local memory_used = collectgarbage("count") - start_memory
-   return memory_used
+   return collectgarbage("count") - start_memory
 end
 
 --- Determine the round parameters
