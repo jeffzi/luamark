@@ -22,7 +22,9 @@ jobs:
         uses: leafo/gh-actions-luarocks@v4
 
       - name: Setup dependencies
-        run: luarocks install busted
+        run: |
+          luarocks install busted
+          luarocks install socket
 
       - name: Run tests
         run: busted
