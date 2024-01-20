@@ -25,7 +25,7 @@ jobs:
         uses: leafo/gh-actions-luarocks@v4
 
       - name: Install dependencies
-        run: luarocks install llcheck
+        run: luarocks install llscheck
 
       - name: Run llscheck
         run: llscheck src
