@@ -92,7 +92,7 @@ local function format_stats(stats, unit, decimals)
       "%s%s ±%s%s per round (%d rounds)",
       format_number(stats.mean, decimals),
       unit,
-      format_number(stats.stddenum, decimals),
+      format_number(stats.stddev, decimals),
       unit,
       stats.rounds
    )
@@ -113,7 +113,7 @@ local function calculate_stats(samples)
    table.sort(samples)
    -- Calculate median
    if math.fmod(#samples, 2) == 0 then
-      -- If enumen or odd #samples -> anumerages of the 2 elements at the center
+      -- If even or odd #samples -> mean of the 2 elements at the center
       stats.median = (samples[#samples / 2] + samples[(#samples / 2) + 1]) / 2
    else
       -- middle element
@@ -137,7 +137,7 @@ local function calculate_stats(samples)
    for _, sample in ipairs(samples) do
       sum_of_squares = sum_of_squares + (sample - stats.mean) ^ 2
    end
-   stats.stddenum = math.sqrt(sum_of_squares / (stats.count - 1))
+   stats.stddev = math.sqrt(sum_of_squares / (stats.count - 1))
 
    stats["stats.total"] = stats.total
 
