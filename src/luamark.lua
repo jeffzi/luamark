@@ -149,18 +149,18 @@ end
 -- ----------------------------------------------------------------------------
 
 --- Measures the time taken to execute a function once.
----@param func function The function to measure.
----@return number # The time taken to execute the function.
-local function measure_time(func)
+---@param func fun(): any The zero-arg function to measure.
+---@return number # The time taken to execute the function (in seconds).
+function luamark.measure_time(func)
    local start = clock()
    func()
    return clock() - start
 end
 
 --- Measures the memory used by a function.
----@param func function The function to measure.
+---@param func fun(): any The zero-arg function to measure.
 ---@return number # The amount of memory used by the function (in kilobytes).
-local function measure_memory(func)
+function luamark.measure_memory(func)
    local start_memory = collectgarbage("count")
    func()
    local memory_used = collectgarbage("count") - start_memory
@@ -175,7 +175,7 @@ local function calibrate_round(func)
    local iterations = 1
    while true do
       local repeated_func = rerun(func, iterations)
-      local duration = measure_time(repeated_func)
+      local duration = luamark.measure_time(repeated_func)
       if duration >= min_time then
          break
       end
@@ -198,12 +198,24 @@ end
 ---@param rounds number The number of rounds, i.e. set of runs
 ---@param disable_gc boolean Whether to disable garbage collection during the benchmark.
 ---@return table # A table containing the results of the benchmark .
-local function single_benchmark(func, measure, rounds, disable_gc, unit, decimals)
+local function single_benchmark(func, measure, rounds, iterations, warmups, disable_gc, unit, decimals)
+   assert(
+      type(func) == "function" or type("function") == "table",
+      "'func' must be a function or a table of functions indexed by name."
+   )
    rounds = rounds or MIN_ROUNDS
-   local iterations = calibrate_round(func)
+   assert(rounds > 0, "'rounds' must be > 0.")
+
+   local iterations = iterations or calibrate_round(func)
+   assert(iterations > 0, "'iterations' must be > 0.")
+
    local inner_loop = rerun(func, iterations)
 
-   inner_loop() -- warmup 1 round
+   warmups = warmups or 1
+   assert(warmups >= 0, "'warmups' must be >= 0.")
+   for _ = 1, warmups do
+      inner_loop()
+   end
 
    local timestamp = os.date("!%Y-%m-%d %H:%M:%SZ")
    local samples = {}
@@ -221,6 +233,7 @@ local function single_benchmark(func, measure, rounds, disable_gc, unit, decimal
    local results = calculate_stats(samples)
    results.rounds = rounds
    results.iterations = iterations
+   results.warmups = warmups
    results.timestamp = timestamp
 
    setmetatable(results, {
@@ -251,16 +264,25 @@ end
 ---@param func (fun(): any)|({[string]: fun(): any}) A single zero-argument function or a table of zero-argument functions indexed by name.
 ---@param rounds? number The number of times to run the benchmark. Defaults to a predetermined number if not provided.
 ---@return {[string]:any}|{[string]:{[string]: any}} # A table of statistical measurements for the function(s) benchmarked, indexed by the function name if multiple functions were given.
-function luamark.timeit(func, rounds)
-   return benchmark(func, measure_time, rounds, true, "s", count_decimals(clock_resolution))
+function luamark.timeit(func, rounds, iterations, warmups)
+   return benchmark(
+      func,
+      luamark.measure_time,
+      rounds,
+      iterations,
+      warmups,
+      true,
+      "s",
+      count_decimals(clock_resolution)
+   )
 end
 
 --- Benchmarks a function for memory usage. The memory usage is represented in kilobytes.
 ---@param func (fun(): any)|({[string]: fun(): any}) A single zero-argument function or a table of zero-argument functions indexed by name.
 ---@param rounds? number The number of times to run the benchmark. Defaults to a predetermined number if not provided.
 ---@return {[string]:any}|{[string]:{[string]: any}} # A table of statistical measurements for the function(s) benchmarked, indexed by the function name if multiple functions were given.
-function luamark.memit(func, rounds)
-   return benchmark(func, measure_memory, rounds, false, "kb", 4)
+function luamark.memit(func, rounds, iterations, warmups)
+   return benchmark(func, luamark.measure_memory, rounds, iterations, warmups, false, "kb", 4)
 end
 
 return luamark
