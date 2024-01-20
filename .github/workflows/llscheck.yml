@@ -1,0 +1,31 @@
+name: LLSCheck
+
+on: [push, pull_request]
+
+jobs:
+  llscheck:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Homebrew
+        id: set-up-homebrew
+        uses: Homebrew/actions/setup-homebrew@master
+
+      - name: Install Lua Language Server
+        run: brew install lua-language-server
+
+      - name: Setup Lua
+        uses: leafo/gh-actions-lua@v10
+        with:
+          luaVersion: 5.1
+
+      - name: Setup LuaRocks
+        uses: leafo/gh-actions-luarocks@v4
+
+      - name: Install dependencies
+        run: luarocks install llcheck
+
+      - name: Run llscheck
+        run: llscheck src
