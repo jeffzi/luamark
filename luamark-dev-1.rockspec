@@ -27,7 +27,7 @@ description = {
 
 dependencies = {
    "lua >= 5.1",
-   "socket >= 3.0.0",
+   "luasocket >= 3.0.0",
 }
 
 build = {
