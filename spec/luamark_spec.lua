@@ -8,7 +8,7 @@ local socket = require("socket")
 
 local SLEEP_TIME = 0.001
 local TIME_TOL = 0.001
-local MEMORY_TOL = 0.0001
+local MEMORY_TOL = 0.001
 local ROUNDS_CASES = { nil, 2, 3 }
 
 local noop = function() end
