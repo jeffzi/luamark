@@ -1,9 +1,35 @@
 # luamark
 
+## measure_memory
+
+```lua
+function luamark.measure_memory(func: fun():any)
+  -> number
+```
+
+Measures the memory used by a function.
+
+@_param_ `func` — The zero-arg function to measure.
+
+@_return_ — The amount of memory used by the function (in kilobytes).
+
+## measure_time
+
+```lua
+function luamark.measure_time(func: fun():any)
+  -> number
+```
+
+Measures the time taken to execute a function once.
+
+@_param_ `func` — The zero-arg function to measure.
+
+@_return_ — The time taken to execute the function (in seconds).
+
 ## memit
 
 ```lua
-function luamark.memit(func: fun():any|{ [string]: fun():any }, rounds?: number)
+function luamark.memit(func: fun():any|{ [string]: fun():any }, rounds?: number, iterations: any, warmups: any)
   -> { [string]: any }|{ [string]: { [string]: any } }
 ```
 
@@ -18,7 +44,7 @@ Benchmarks a function for memory usage. The memory usage is represented in kilob
 ## timeit
 
 ```lua
-function luamark.timeit(func: fun():any|{ [string]: fun():any }, rounds?: number)
+function luamark.timeit(func: fun():any|{ [string]: fun():any }, rounds?: number, iterations: any, warmups: any)
   -> { [string]: any }|{ [string]: { [string]: any } }
 ```
 
