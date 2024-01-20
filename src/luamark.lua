@@ -206,7 +206,7 @@ local function single_benchmark(func, measure, rounds, iterations, warmups, disa
    rounds = rounds or MIN_ROUNDS
    assert(rounds > 0, "'rounds' must be > 0.")
 
-   local iterations = iterations or calibrate_round(func)
+   iterations = iterations or calibrate_round(func)
    assert(iterations > 0, "'iterations' must be > 0.")
 
    local inner_loop = rerun(func, iterations)
@@ -248,7 +248,7 @@ end
 ---@param funcs (fun(): any)|({[string]: fun(): any}) A single zero-argument function or a table of zero-argument functions indexed by name.
 ---@param ... any arguments that will be forwarded to `single_benchmark`.
 ---@return {[string]:any}|{[string]:{[string]: any}} # A table of statistical measurements for the function(s) benchmarked, indexed by the function name if multiple functions were given.
-function benchmark(funcs, ...)
+local function benchmark(funcs, ...)
    if type(funcs) == "function" then
       return single_benchmark(funcs, ...)
    end
