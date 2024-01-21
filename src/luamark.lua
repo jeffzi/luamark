@@ -144,6 +144,37 @@ local function calculate_stats(samples)
    return stats
 end
 
+--- Rank benchmark results (`timeit` or `memit`) by specified `key` and adds a 'rank' and 'ratio' key to each.
+--- The smallest attribute value gets the rank 1 and ratio 1.0, other ratios are relative to it.
+---@param benchmark_results {[string]:any}|{[string]:{[string]: any}} The benchmark results to rank.
+---@param key string The stats to rank by.
+---@return {[string]:any}|{[string]:{[string]: any}}
+function luamark.rank(benchmark_results, key)
+   assert(benchmark_results, "'benchmark_results' is nil or empty.")
+
+   local ranks = {}
+   for benchmark_name, stats in pairs(benchmark_results) do
+      table.insert(ranks, { name = benchmark_name, value = stats[key] })
+   end
+
+   table.sort(ranks, function(a, b)
+      return a.value < b.value
+   end)
+
+   local rank = 1
+   local prev_value = nil
+   local min = ranks[1].value
+   for i, entry in ipairs(ranks) do
+      if prev_value ~= entry.value then
+         rank = i
+         prev_value = entry.value
+      end
+      benchmark_results[entry.name].rank = rank
+      benchmark_results[entry.name].ratio = entry.value / min
+   end
+   return benchmark_results
+end
+
 -- ----------------------------------------------------------------------------
 -- Benchmark
 -- ----------------------------------------------------------------------------
@@ -257,7 +288,8 @@ local function benchmark(funcs, ...)
    for name, func in pairs(funcs) do
       results[name] = single_benchmark(func, ...)
    end
-   return results
+
+   return luamark.rank(results, "mean")
 end
 
 --- Benchmarks a function for execution time. The time is represented in seconds.

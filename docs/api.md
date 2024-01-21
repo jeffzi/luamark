@@ -41,6 +41,20 @@ Benchmarks a function for memory usage. The memory usage is represented in kilob
 
 @_return_ — A table of statistical measurements for the function(s) benchmarked, indexed by the function name if multiple functions were given.
 
+## rank
+
+```lua
+function luamark.rank(benchmark_results: { [string]: any }|{ [string]: { [string]: any } }, key: string)
+  -> { [string]: any }|{ [string]: { [string]: any } }
+```
+
+Rank benchmark results (`timeit` or `memit`) by specified `key` and adds a 'rank' and 'ratio' key to each.
+The smallest attribute value gets the rank 1 and ratio 1.0, other ratios are relative to it.
+
+@_param_ `benchmark_results` — The benchmark results to rank.
+
+@_param_ `key` — The stats to rank by.
+
 ## timeit
 
 ```lua
