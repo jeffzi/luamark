@@ -44,19 +44,13 @@ local half = 0.50000000000008
 local function math_round(num, precision)
    -- https://github.com/Mons/lua-math-round/blob/master/math/round.lua
    local mul = 10 ^ (precision or 0)
+   local rounded
    if num > 0 then
-      return math.floor(num * mul + half) / mul
+      rounded = math.floor(num * mul + half) / mul
    else
-      return math.ceil(num * mul - half) / mul
+      rounded = math.ceil(num * mul - half) / mul
    end
-end
-
----@param num integer
----@return integer
-local function count_precision(num)
-   local str = tostring(num)
-   local precision = string.find(str, "%.")
-   return precision and (#str - precision) or 0
+   return math.max(rounded, 10 ^ -precision)
 end
 
 --- Return a function which runs `func` `n` times when called.
