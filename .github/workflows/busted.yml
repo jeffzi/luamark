@@ -8,7 +8,9 @@ jobs:
       fail-fast: false
       matrix:
         luaVersion: ["5.4", "5.3", "5.2", "5.1", "luajit"]
-    runs-on: ubuntu-latest
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -18,12 +20,18 @@ jobs:
         with:
           luaVersion: ${{ matrix.luaVersion }}
 
+      - name: Setup Windows environment
+        if: matrix.os == 'windows-latest'
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Setup LuaRocks
         uses: leafo/gh-actions-luarocks@v4
 
       - name: Setup dependencies
         run: |
           luarocks install busted
+          luarocks install chronos
+          luarocks install luaposix
           luarocks install luasocket
 
       - name: Run tests
