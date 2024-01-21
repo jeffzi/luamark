@@ -170,7 +170,8 @@ for _, modname in ipairs(LIBS) do
       -- ----------------------------------------------------------------------------
       -- For unkown reasons, memory calls are not deterministic on 5.2 and 5.3
 
-      if _VERSION ~= "Lua 5.2" and _VERSION ~= "Lua 5.3" then
+      local is_jit = type(jit) == "table"
+      if _VERSION ~= "Lua 5.2" and _VERSION ~= "Lua 5.3" and not is_jit then
          describe("memit", function()
             local funcs = {
                noop = noop,
