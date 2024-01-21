@@ -38,11 +38,11 @@ function luamark.get_clock(modname)
       -- clock_gettime is not defined on MacOS
       if has_module and lib.clock_gettime then
          -- 1ns
+         clock_precision = 9
          clock = function()
-            local s, ns = lib.clock_gettime(lib.CLOCK_MONOTONIC)
-            return s + ns / (10 ^ -clock_precision)
+            local time_spec = lib.clock_gettime(lib.CLOCK_MONOTONIC)
+            return time_spec.tv_sec + time_spec.tv_nsec * (10 ^ -clock_precision)
          end
-         clock, clock_precision = clock, 9
       end
    elseif modname == "socket" then
       if has_module then
