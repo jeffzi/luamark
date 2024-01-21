@@ -39,11 +39,11 @@ end
 local half = 0.50000000000008
 
 ---@param num number
----@param decimals number
+---@param precision number
 ---@return number
-local function math_round(num, decimals)
+local function math_round(num, precision)
    -- https://github.com/Mons/lua-math-round/blob/master/math/round.lua
-   local mul = 10 ^ (decimals or 0)
+   local mul = 10 ^ (precision or 0)
    if num > 0 then
       return math.floor(num * mul + half) / mul
    else
@@ -53,10 +53,10 @@ end
 
 ---@param num integer
 ---@return integer
-local function count_decimals(num)
+local function count_precision(num)
    local str = tostring(num)
-   local decimals = string.find(str, "%.")
-   return decimals and (#str - decimals) or 0
+   local precision = string.find(str, "%.")
+   return precision and (#str - precision) or 0
 end
 
 --- Return a function which runs `func` `n` times when called.
@@ -76,26 +76,94 @@ end
 -- ----------------------------------------------------------------------------
 
 ---@param num integer
----@param decimals integer
+---@param precision integer
 ---@return string
-local function format_number(num, decimals)
+local function format_number(num, precision)
    ---@diagnostic disable-next-line: redundant-return-value
-   return string.format(" %." .. decimals .. "f", num):gsub("%.?0+$", "")
+   return string.format(" %." .. precision .. "f", num):gsub("%.?0+$", "")
 end
 
 --- Formats statistical measurements into a readable string.
 ---@param stats table The statistical measurements to format.
 ---@param unit string The unit of measurement.
 ---@return string # A formatted string representing the statistical metrics.
-local function format_stats(stats, unit, decimals)
+local function __tostring_stats(stats, unit, precision)
    return string.format(
-      "%s%s ±%s%s per round (%d rounds)",
-      format_number(stats.mean, decimals),
+      "%s %s ±%s %s per round (%d rounds)",
+      format_number(stats.mean, precision),
       unit,
-      format_number(stats.stddev, decimals),
+      format_number(stats.stddev, precision),
       unit,
       stats.rounds
    )
+end
+
+local function format_row(stats)
+   local unit = stats.unit
+   local precision = stats.precision
+   local row = {}
+   for name, value in pairs(stats) do
+      if name == "ratio" then
+         row[name] = string.format("%.2f", value)
+      elseif name == "min" or name == "max" or name == "mean" or name == "stddev" or name == "median" then
+         row[name] = format_number(value, precision) .. " " .. unit
+      else
+         row[name] = tostring(value)
+      end
+   end
+   return row
+end
+
+---Print a summary of multiple benchmarks.
+---@param benchmark_results {[string]:{[string]: any}} The benchmark results to summarize, indexed by name.
+function luamark.print_summary(benchmark_results)
+   local pretty_rows = {}
+   for benchmark_name, stats in pairs(benchmark_results) do
+      local formatted = format_row(stats)
+      formatted["name"] = benchmark_name
+      table.insert(pretty_rows, formatted)
+   end
+   table.sort(pretty_rows, function(a, b)
+      return a.rank < b.rank
+   end)
+
+   local headers = { "name", "rank", "ratio", "min", "max", "mean", "stddev", "median", "rounds", "iterations" }
+
+   -- Calculate column widths
+   local widths = {}
+   for i, header in ipairs(headers) do
+      widths[i] = #header
+      for _, row in pairs(pretty_rows) do
+         local cell = tostring(row[header] or "")
+         widths[i] = math.max(widths[i], #cell)
+      end
+   end
+
+   local function pad(content, width)
+      local padding = width - #content
+      return content .. string.rep(" ", padding)
+   end
+
+   -- Print header row
+   for i, header in ipairs(headers) do
+      local title_header = header:gsub("^%l", string.upper)
+      io.write(pad(title_header, widths[i]) .. "  ")
+   end
+   io.write("\n")
+
+   -- Print header separator
+   for i, _ in ipairs(headers) do
+      io.write(string.rep("-", widths[i]) .. "  ")
+   end
+   io.write("\n")
+
+   -- Print data rows
+   for _, row in pairs(pretty_rows) do
+      for i, header in ipairs(headers) do
+         io.write(pad(row[header], widths[i]) .. "  ")
+      end
+      io.write("\n")
+   end
 end
 
 -- ----------------------------------------------------------------------------
@@ -146,9 +214,9 @@ end
 
 --- Rank benchmark results (`timeit` or `memit`) by specified `key` and adds a 'rank' and 'ratio' key to each.
 --- The smallest attribute value gets the rank 1 and ratio 1.0, other ratios are relative to it.
----@param benchmark_results {[string]:any}|{[string]:{[string]: any}} The benchmark results to rank.
+---@param benchmark_results {[string]:{[string]: any}} The benchmark results to rank, indexed by name.
 ---@param key string The stats to rank by.
----@return {[string]:any}|{[string]:{[string]: any}}
+---@return {[string]:{[string]: any}}
 function luamark.rank(benchmark_results, key)
    assert(benchmark_results, "'benchmark_results' is nil or empty.")
 
@@ -176,7 +244,6 @@ function luamark.rank(benchmark_results, key)
 end
 
 -- ----------------------------------------------------------------------------
--- Benchmark
 -- ----------------------------------------------------------------------------
 
 --- Measures the time taken to execute a function once.
@@ -229,7 +296,7 @@ end
 ---@param rounds number The number of rounds, i.e. set of runs
 ---@param disable_gc boolean Whether to disable garbage collection during the benchmark.
 ---@return table # A table containing the results of the benchmark .
-local function single_benchmark(func, measure, rounds, iterations, warmups, disable_gc, unit, decimals)
+local function single_benchmark(func, measure, rounds, iterations, warmups, disable_gc, unit, precision)
    assert(
       type(func) == "function" or type("function") == "table",
       "'func' must be a function or a table of functions indexed by name."
@@ -256,7 +323,7 @@ local function single_benchmark(func, measure, rounds, iterations, warmups, disa
          collectgarbage("stop")
       end
 
-      samples[i] = math_round(measure(inner_loop) / iterations, decimals)
+      samples[i] = math_round(measure(inner_loop) / iterations, precision)
 
       collectgarbage("restart")
    end
@@ -266,10 +333,12 @@ local function single_benchmark(func, measure, rounds, iterations, warmups, disa
    results.iterations = iterations
    results.warmups = warmups
    results.timestamp = timestamp
+   results.unit = unit
+   results.precision = precision
 
    setmetatable(results, {
       __tostring = function(self)
-         return format_stats(self, unit, decimals)
+         return __tostring_stats(self, unit, precision)
       end,
    })
 
@@ -305,7 +374,7 @@ function luamark.timeit(func, rounds, iterations, warmups)
       warmups,
       true,
       "s",
-      count_decimals(clock_resolution)
+      count_precision(clock_resolution)
    )
 end
 
