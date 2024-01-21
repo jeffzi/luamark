@@ -16,8 +16,8 @@ local socket = try_require("socket")
 -- ----------------------------------------------------------------------------
 
 local SLEEP_TIME = 0.001
--- socket.sleep doesn't sleep the exact time given
-local TIME_TOL = SLEEP_TIME
+-- socket.sleep doesn't sleep the exact time
+local TIME_TOL = SLEEP_TIME / 3
 local MEMORY_TOL = 0.0005
 local ROUNDS_CASES = { nil, 2 }
 local LIBS = { "socket", "chronos" }
@@ -145,23 +145,22 @@ for _, modname in ipairs(LIBS) do
          end
 
          local rounds = 100
-         local suffix = string.format(" (%s rounds)", rounds or "nil")
 
          local stats = luamark.timeit(counter, rounds, 1, 0)
 
-         test("min" .. suffix, function()
+         test("min", function()
             assert.is_near(SLEEP_TIME, stats.min, TIME_TOL)
          end)
 
-         test("max" .. suffix, function()
-            assert.is_near(max_sleep_time, stats.max, TIME_TOL)
+         test("max", function()
+            assert.is_near(max_sleep_time, stats.max, TIME_TOL * 2)
          end)
 
-         test("mean" .. suffix, function()
+         test("mean", function()
             assert.near(SLEEP_TIME, stats.mean, TIME_TOL)
          end)
 
-         test("median" .. suffix, function()
+         test("median", function()
             assert.near(SLEEP_TIME, stats.median, TIME_TOL)
          end)
       end)
@@ -173,41 +172,38 @@ for _, modname in ipairs(LIBS) do
 
       if _VERSION ~= "Lua 5.2" and _VERSION ~= "Lua 5.3" then
          describe("memit", function()
-            for i = 1, #ROUNDS_CASES do
-               local funcs = {
-                  noop = noop,
-                  empty_table = function()
-                     local t = {}
-                     t = nil
-                  end,
-                  complex = function()
-                     local i = 1
-                     local t = { 1, 2, 3 }
-                     local s = "luamark"
-                     t = nil
-                  end,
-               }
-               local all_stats = luamark.memit(funcs, rounds, 1, 0)
+            local funcs = {
+               noop = noop,
+               empty_table = function()
+                  local t = {}
+                  t = nil
+               end,
+               complex = function()
+                  local i = 1
+                  local t = { 1, 2, 3 }
+                  local s = "luamark"
+                  t = nil
+               end,
+            }
+            local all_stats = luamark.memit(funcs, rounds, 1, 0)
 
-               for func_name, stats in pairs(all_stats) do
-                  local single_call_memory = luamark.measure_memory(funcs[func_name])
+            for func_name, stats in pairs(all_stats) do
+               local single_call_memory = luamark.measure_memory(funcs[func_name])
 
-                  local rounds = ROUNDS_CASES[i]
-                  local suffix = string.format(" (%s %s rounds)", func_name, rounds or "nil")
+               local rounds = 10
 
-                  local total = single_call_memory * stats.count
-                  test("total" .. suffix, function()
-                     assert.near(total, stats.total, MEMORY_TOL * 2)
-                  end)
+               local total = single_call_memory * stats.count
+               test("total", function()
+                  assert.near(total, stats.total, MEMORY_TOL * 2)
+               end)
 
-                  test("mean" .. suffix, function()
-                     assert.near(single_call_memory, stats.mean, MEMORY_TOL)
-                  end)
+               test("mean", function()
+                  assert.near(single_call_memory, stats.mean, MEMORY_TOL)
+               end)
 
-                  test("median" .. suffix, function()
-                     assert.near(single_call_memory, stats.median, MEMORY_TOL)
-                  end)
-               end
+               test("median", function()
+                  assert.near(single_call_memory, stats.median, MEMORY_TOL)
+               end)
             end
          end)
       end
