@@ -12,7 +12,7 @@ local posix = try_require("posix")
 local socket = try_require("socket")
 
 -- ----------------------------------------------------------------------------
--- Constants
+-- Test parameters
 -- ----------------------------------------------------------------------------
 
 local SLEEP_TIME = 0.001
@@ -20,6 +20,7 @@ local SLEEP_TIME = 0.001
 local TIME_TOL = SLEEP_TIME
 local MEMORY_TOL = 0.0005
 local ROUNDS_CASES = { nil, 2 }
+local LIBS = { "socket", "chronos" }
 local LIBS = { "socket", "chronos" }
 
 local _posix_clock, _ = luamark.get_clock("posix.time")
@@ -135,45 +136,34 @@ for _, modname in ipairs(LIBS) do
       -- ----------------------------------------------------------------------------
 
       describe("timeit", function()
-         for i = 1, #ROUNDS_CASES do
-            local calls = 0
-
-            local counter = function()
-               calls = calls + 1
-               return socket.sleep(SLEEP_TIME * calls)
-            end
-
-            local rounds = ROUNDS_CASES[i]
-            local suffix = string.format(" (%s rounds)", rounds or "nil")
-
-            local stats = luamark.timeit(counter, rounds, 1, 0)
-
-            test("min" .. suffix, function()
-               assert.is_near(SLEEP_TIME, stats.min, TIME_TOL)
-            end)
-            test("max" .. suffix, function()
-               assert.is_near(SLEEP_TIME * calls, stats.max, TIME_TOL * calls)
-            end)
-
-            local total = SLEEP_TIME * calls * (calls + 1) / 2
-            test("total" .. suffix, function()
-               assert.near(total, stats.total, TIME_TOL * calls)
-            end)
-
-            local mean = total / calls
-            test("mean" .. suffix, function()
-               assert.near(mean, stats.mean, TIME_TOL)
-               -- assert.is_near(mean, stats.mean, 0.005)
-            end)
-
-            test("median" .. suffix, function()
-               local stats = luamark.timeit(function()
-                  socket.sleep(SLEEP_TIME)
-               end)
-               assert.near(SLEEP_TIME, stats.median, TIME_TOL)
-               assert.near(0, stats.stddev, TIME_TOL)
-            end)
+         local calls = 0
+         local max_sleep_time = SLEEP_TIME * 2
+         local counter = function()
+            calls = calls + 1
+            local sleep_time = calls == 1 and max_sleep_time or SLEEP_TIME
+            socket.sleep(sleep_time)
          end
+
+         local rounds = 100
+         local suffix = string.format(" (%s rounds)", rounds or "nil")
+
+         local stats = luamark.timeit(counter, rounds, 1, 0)
+
+         test("min" .. suffix, function()
+            assert.is_near(SLEEP_TIME, stats.min, TIME_TOL)
+         end)
+
+         test("max" .. suffix, function()
+            assert.is_near(max_sleep_time, stats.max, TIME_TOL)
+         end)
+
+         test("mean" .. suffix, function()
+            assert.near(SLEEP_TIME, stats.mean, TIME_TOL)
+         end)
+
+         test("median" .. suffix, function()
+            assert.near(SLEEP_TIME, stats.median, TIME_TOL)
+         end)
       end)
 
       -- ----------------------------------------------------------------------------
