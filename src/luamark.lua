@@ -10,27 +10,62 @@ local MIN_ROUNDS = 5
 
 local MAX_INT = 2 ^ 1023
 
-local clock, clock_resolution
-local has_posix, posix = pcall(require, "posix.time")
+-- ----------------------------------------------------------------------------
+-- Clock
+-- ----------------------------------------------------------------------------
 
--- clock_gettime is not defined on MacOS
-if has_posix and posix.clock_gettime then
-   clock_resolution = 1e-9 -- 1ns
-   clock = function()
-      local s, ns = posix.clock_gettime(posix.CLOCK_MONOTONIC)
-      return s + ns / clock_resolution
+---Get clock and clock precision from a module name.
+---@param modname string
+---@return (fun(): number)|nil
+---@return integer|nil
+function luamark.get_clock(modname)
+   if modname == "os" then
+      return os.clock, 3
    end
-else
-   local has_socket, socket = pcall(require, "socket")
-   if has_socket then
-      clock = socket.gettime
-      clock_resolution = 1e-4 -- 10µs
-   else
-      -- Inconsistent across platforms: report real time on windows nums cpu time on linux
-      clock = os.clock
-      clock_resolution = 1e-3 -- 1ms
+
+   local has_module, lib = pcall(require, modname)
+   if not has_module then
+      return nil, nil
    end
+
+   local clock, clock_precision
+   if modname == "chronos" then
+      if has_module then
+         -- 1ns
+         clock, clock_precision = lib.nanotime, 9
+      end
+   elseif modname == "posix.time" then
+      -- clock_gettime is not defined on MacOS
+      if has_module and lib.clock_gettime then
+         -- 1ns
+         clock = function()
+            local s, ns = lib.clock_gettime(lib.CLOCK_MONOTONIC)
+            return s + ns / (10 ^ -clock_precision)
+         end
+         clock, clock_precision = clock, 9
+      end
+   elseif modname == "socket" then
+      if has_module then
+         -- 10µs
+         clock, clock_precision = lib.gettime, 4
+      end
+   end
+   return clock, clock_precision
 end
+
+local clock, clock_precision = luamark.get_clock("chronos")
+if not clock then
+   clock, clock_precision = luamark.get_clock("posix.time")
+end
+if not clock then
+   clock, clock_precision = luamark.get_clock("socket")
+end
+if not clock then
+   clock, clock_precision = luamark.get_clock("os")
+end
+
+luamark.clock = clock
+luamark.clock_precision = clock_precision
 
 -- ----------------------------------------------------------------------------
 -- Utils
@@ -42,7 +77,6 @@ local half = 0.50000000000008
 ---@param precision number
 ---@return number
 local function math_round(num, precision)
-   -- https://github.com/Mons/lua-math-round/blob/master/math/round.lua
    local mul = 10 ^ (precision or 0)
    local rounded
    if num > 0 then
@@ -244,9 +278,9 @@ end
 ---@param func fun(): any The zero-arg function to measure.
 ---@return number # The time taken to execute the function (in seconds).
 function luamark.measure_time(func)
-   local start = clock()
+   local start = luamark.clock()
    func()
-   return clock() - start
+   return luamark.clock() - start
 end
 
 --- Measures the memory used by a function.
@@ -263,7 +297,7 @@ end
 ---@param func function The function to benchmark.
 ---@return number # Duration of a round.
 local function calibrate_round(func)
-   local min_time = clock_resolution * CALIBRATION_PRECISION
+   local min_time = (10 ^ -clock_precision) * CALIBRATION_PRECISION
    local iterations = 1
    while true do
       local repeated_func = rerun(func, iterations)
@@ -271,7 +305,7 @@ local function calibrate_round(func)
       if duration >= min_time then
          break
       end
-      if duration >= clock_resolution then
+      if duration >= clock_precision then
          iterations = math.ceil(min_time * iterations / duration)
          if iterations == 1 then
             -- Nothing to calibrate anymore
@@ -360,16 +394,7 @@ end
 ---@param rounds? number The number of times to run the benchmark. Defaults to a predetermined number if not provided.
 ---@return {[string]:any}|{[string]:{[string]: any}} # A table of statistical measurements for the function(s) benchmarked, indexed by the function name if multiple functions were given.
 function luamark.timeit(func, rounds, iterations, warmups)
-   return benchmark(
-      func,
-      luamark.measure_time,
-      rounds,
-      iterations,
-      warmups,
-      true,
-      "s",
-      count_precision(clock_resolution)
-   )
+   return benchmark(func, luamark.measure_time, rounds, iterations, warmups, true, "s", luamark.clock_precision)
 end
 
 --- Benchmarks a function for memory usage. The memory usage is represented in kilobytes.
