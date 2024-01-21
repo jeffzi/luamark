@@ -79,8 +79,8 @@ end
 ---@param precision integer
 ---@return string
 local function format_number(num, precision)
-   ---@diagnostic disable-next-line: redundant-return-value
-   return string.format(" %." .. precision .. "f", num):gsub("%.?0+$", "")
+   local formatted, _ = string.format("%." .. precision .. "f", num):gsub("%.?0+$", "")
+   return formatted
 end
 
 --- Formats statistical measurements into a readable string.
