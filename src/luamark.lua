@@ -238,7 +238,7 @@ function luamark.rank(benchmark_results, key)
          prev_value = entry.value
       end
       benchmark_results[entry.name].rank = rank
-      benchmark_results[entry.name].ratio = entry.value / min
+      benchmark_results[entry.name].ratio = rank == 1 and 1 or entry.value / min
    end
    return benchmark_results
 end
