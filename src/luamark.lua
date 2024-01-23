@@ -256,8 +256,6 @@ local function calculate_stats(samples)
    end
    stats.stddev = math.sqrt(sum_of_squares / (stats.count - 1))
 
-   stats["stats.total"] = stats.total
-
    return stats
 end
 
