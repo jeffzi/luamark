@@ -1,24 +1,31 @@
+---@class luamark
+local luamark = {}
+
 -- ----------------------------------------------------------------------------
 -- Constants
 -- ----------------------------------------------------------------------------
 
----@class luamark
-local luamark = {}
+local MAX_ITERATIONS = 1e6
+local MIN_ROUNDS = 100
+local MAX_ROUNDS = 1e6
+local WARMUPS = 1
+local MIN_TIME = 1
 
 local CALIBRATION_PRECISION = 5
-local MIN_ROUNDS = 5
 
 local MAX_INT = 2 ^ 1023
 
--- ----------------------------------------------------------------------------
+--------------------------------------------------------------------------
 -- Clock
 -- ----------------------------------------------------------------------------
+
+local clock, clock_precision
 
 ---Get clock and clock precision from a module name.
 ---@param modname string
 ---@return (fun(): number)|nil
 ---@return integer|nil
-function luamark.get_clock(modname)
+local function set_clock(modname)
    if modname == "os" then
       return os.clock, 3
    end
@@ -28,7 +35,6 @@ function luamark.get_clock(modname)
       return nil, nil
    end
 
-   local clock, clock_precision
    if modname == "chronos" then
       if has_module then
          -- 1ns
@@ -41,7 +47,7 @@ function luamark.get_clock(modname)
          clock_precision = 9
          clock = function()
             local time_spec = lib.clock_gettime(lib.CLOCK_MONOTONIC)
-            return time_spec.tv_sec + time_spec.tv_nsec * (10 ^ -clock_precision)
+            return time_spec.tv_sec + time_spec.tv_nsec * clock_precision
          end
       end
    elseif modname == "socket" then
@@ -50,22 +56,30 @@ function luamark.get_clock(modname)
          clock, clock_precision = lib.gettime, 4
       end
    end
-   return clock, clock_precision
 end
 
-local clock, clock_precision = luamark.get_clock("chronos")
+set_clock("chronos")
 if not clock then
-   clock, clock_precision = luamark.get_clock("posix.time")
+   set_clock("posix.time")
 end
 if not clock then
-   clock, clock_precision = luamark.get_clock("socket")
+   set_clock("socket")
 end
 if not clock then
-   clock, clock_precision = luamark.get_clock("os")
+   set_clock("os")
 end
 
-luamark.clock = clock
-luamark.clock_precision = clock_precision
+local function get_min_clocktime()
+   return (10 ^ -clock_precision)
+end
+
+-- Expose private to busted
+-- luacheck:ignore 113
+if _TEST then
+   luamark.set_clock = set_clock
+   luamark.get_min_clocktime = get_min_clocktime
+   luamark.CALIBRATION_PRECISION = CALIBRATION_PRECISION
+end
 
 -- ----------------------------------------------------------------------------
 -- Utils
@@ -272,15 +286,16 @@ function luamark.rank(benchmark_results, key)
 end
 
 -- ----------------------------------------------------------------------------
+-- Benchmark
 -- ----------------------------------------------------------------------------
 
 --- Measures the time taken to execute a function once.
 ---@param func fun(): any The zero-arg function to measure.
 ---@return number # The time taken to execute the function (in seconds).
 function luamark.measure_time(func)
-   local start = luamark.clock()
+   local start = clock()
    func()
-   return luamark.clock() - start
+   return clock() - start
 end
 
 --- Measures the memory used by a function.
@@ -296,12 +311,14 @@ end
 --- Determine the round parameters
 ---@param func function The function to benchmark.
 ---@return number # Duration of a round.
-local function calibrate_round(func)
-   local min_time = (10 ^ -clock_precision) * CALIBRATION_PRECISION
+local function calibrate_iterations(func)
+   local min_time = get_min_clocktime() * CALIBRATION_PRECISION
+
+   local duration
    local iterations = 1
    while true do
       local repeated_func = rerun(func, iterations)
-      local duration = luamark.measure_time(repeated_func)
+      duration = luamark.measure_time(repeated_func)
       if duration >= min_time then
          break
       end
@@ -315,51 +332,75 @@ local function calibrate_round(func)
          iterations = iterations * 10
       end
    end
-   return iterations
+
+   return math.min(iterations, MAX_ITERATIONS)
+end
+
+---Return pratical rounds and max time
+---@param round_duration number
+---@return integer rounds
+---@return integer max_time
+local function calibrate_stop(round_duration)
+   local max_time = math.max(MIN_ROUNDS * round_duration, MIN_TIME)
+   return math.min(max_time / round_duration, MAX_ROUNDS), max_time
 end
 
 --- Runs a benchmark on a function using a specified measurement method.
 ---@param func function The function to benchmark.
 ---@param measure function The measurement function to use (e.g., measure_time or measure_memory).
----@param rounds number The number of rounds, i.e. set of runs
----@param disable_gc boolean Whether to disable garbage collection during the benchmark.
+---@param rounds? number The number of rounds, i.e. set of runs
+---@param max_time? number Maximum run time. It may be exceeded if test function is very slow.
+---@param disable_gc? boolean Whether to disable garbage collection during the benchmark.
 ---@return table # A table containing the results of the benchmark .
-local function single_benchmark(func, measure, rounds, iterations, warmups, disable_gc, unit, precision)
+local function single_benchmark(func, measure, rounds, max_time, disable_gc, unit, precision)
    assert(
       type(func) == "function" or type("function") == "table",
       "'func' must be a function or a table of functions indexed by name."
    )
-   rounds = rounds or MIN_ROUNDS
-   assert(rounds > 0, "'rounds' must be > 0.")
+   assert(not rounds or rounds > 0, "'rounds' must be > 0.")
+   assert(not max_time or max_time > 0, "'max_time' must be > 0.")
+   disable_gc = disable_gc or true
 
-   iterations = iterations or calibrate_round(func)
-   assert(iterations > 0, "'iterations' must be > 0.")
-
+   local iterations = calibrate_iterations(func)
    local inner_loop = rerun(func, iterations)
 
-   warmups = warmups or 1
-   assert(warmups >= 0, "'warmups' must be >= 0.")
-   for _ = 1, warmups do
+   for _ = 1, WARMUPS do
       inner_loop()
    end
 
    local timestamp = os.date("!%Y-%m-%d %H:%M:%SZ")
    local samples = {}
-   for i = 1, rounds do
-      collectgarbage("collect")
-      if disable_gc then
-         collectgarbage("stop")
-      end
+   local completed_rounds = 0
+   local total_duration = 0
+   local duration, start
 
-      samples[i] = math_round(measure(inner_loop) / iterations, precision)
-
-      collectgarbage("restart")
+   if disable_gc then
+      collectgarbage("stop")
    end
 
+   repeat
+      completed_rounds = completed_rounds + 1
+      start = clock()
+
+      samples[completed_rounds] = math_round(measure(inner_loop) / iterations, precision)
+
+      duration = clock() - start
+      total_duration = total_duration + duration
+      if completed_rounds == 1 and not rounds and not max_time then
+         -- Wait 1 round to gather a sample of loop duration,
+         -- as memit can slow down the loop significantly because of the collectgarbage calls.
+         rounds, max_time = calibrate_stop(duration)
+      end
+   until (max_time and total_duration >= (max_time - duration))
+      or (rounds and completed_rounds == rounds)
+      or (completed_rounds == MAX_ROUNDS)
+
+   collectgarbage("restart")
+
    local results = calculate_stats(samples)
-   results.rounds = rounds
+   results.rounds = completed_rounds
    results.iterations = iterations
-   results.warmups = warmups
+   results.warmups = WARMUPS
    results.timestamp = timestamp
    results.unit = unit
    results.precision = precision
@@ -391,18 +432,20 @@ end
 
 --- Benchmarks a function for execution time. The time is represented in seconds.
 ---@param func (fun(): any)|({[string]: fun(): any}) A single zero-argument function or a table of zero-argument functions indexed by name.
----@param rounds? number The number of times to run the benchmark. Defaults to a predetermined number if not provided.
+---@param rounds? integer The number of times to run the benchmark. Defaults to a predetermined number if not provided.
+---@param max_time? number Maximum run time. It may be exceeded if test function is very slow.
 ---@return {[string]:any}|{[string]:{[string]: any}} # A table of statistical measurements for the function(s) benchmarked, indexed by the function name if multiple functions were given.
-function luamark.timeit(func, rounds, iterations, warmups)
-   return benchmark(func, luamark.measure_time, rounds, iterations, warmups, true, "s", luamark.clock_precision)
+function luamark.timeit(func, rounds, max_time)
+   return benchmark(func, luamark.measure_time, rounds, max_time, true, "s", clock_precision)
 end
 
 --- Benchmarks a function for memory usage. The memory usage is represented in kilobytes.
 ---@param func (fun(): any)|({[string]: fun(): any}) A single zero-argument function or a table of zero-argument functions indexed by name.
 ---@param rounds? number The number of times to run the benchmark. Defaults to a predetermined number if not provided.
+---@param max_time? number Maximum run time. It may be exceeded if test function is very slow.
 ---@return {[string]:any}|{[string]:{[string]: any}} # A table of statistical measurements for the function(s) benchmarked, indexed by the function name if multiple functions were given.
-function luamark.memit(func, rounds, iterations, warmups)
-   return benchmark(func, luamark.measure_memory, rounds, iterations, warmups, false, "kb", 4)
+function luamark.memit(func, rounds, max_time)
+   return benchmark(func, luamark.measure_memory, rounds, max_time, false, "kb", 4)
 end
 
 return luamark
