@@ -1,6 +1,6 @@
 package = "luamark"
 
-local package_version = "dev"
+local package_version = "0.3.0"
 local rockspec_revision = "1"
 
 version = package_version .. "-" .. rockspec_revision
