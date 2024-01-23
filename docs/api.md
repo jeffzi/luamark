@@ -3,7 +3,7 @@
 ## timeit
 
 ```lua
-function luamark.timeit(func: fun():any|{ [string]: fun():any }, rounds?: number, iterations: any, warmups: any)
+function luamark.timeit(func: fun():any|{ [string]: fun():any }, rounds?: integer, max_time?: integer)
   -> { [string]: any }|{ [string]: { [string]: any } }
 ```
 
@@ -13,12 +13,14 @@ Benchmarks a function for execution time. The time is represented in seconds.
 
 @_param_ `rounds` — The number of times to run the benchmark. Defaults to a predetermined number if not provided.
 
+@_param_ `max_time` — Maximum run time. It may be exceeded if test function is very slow.
+
 @_return_ — A table of statistical measurements for the function(s) benchmarked, indexed by the function name if multiple functions were given.
 
 ## memit
 
 ```lua
-function luamark.memit(func: fun():any|{ [string]: fun():any }, rounds?: number, iterations: any, warmups: any)
+function luamark.memit(func: fun():any|{ [string]: fun():any }, rounds?: number, max_time?: integer)
   -> { [string]: any }|{ [string]: { [string]: any } }
 ```
 
@@ -27,6 +29,8 @@ Benchmarks a function for memory usage. The memory usage is represented in kilob
 @_param_ `func` — A single zero-argument function or a table of zero-argument functions indexed by name.
 
 @_param_ `rounds` — The number of times to run the benchmark. Defaults to a predetermined number if not provided.
+
+@_param_ `max_time` — Maximum run time. It may be exceeded if test function is very slow.
 
 @_return_ — A table of statistical measurements for the function(s) benchmarked, indexed by the function name if multiple functions were given.
 
@@ -70,12 +74,12 @@ Measures the memory used by a function.
 
 ```lua
 function luamark.rank(benchmark_results: { [string]: { [string]: any } }, key: string)
-  -> { [string]: { [string]: any }
+  -> { [string]: { [string]: any } }
 ```
 
 Rank benchmark results (`timeit` or `memit`) by specified `key` and adds a 'rank' and 'ratio' key to each.
 The smallest attribute value gets the rank 1 and ratio 1.0, other ratios are relative to it.
 
-@_param_ `benchmark_results` — The benchmark results to rank.
+@_param_ `benchmark_results` — The benchmark results to rank, indexed by name.
 
 @_param_ `key` — The stats to rank by.
