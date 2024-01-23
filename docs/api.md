@@ -3,7 +3,7 @@
 ## timeit
 
 ```lua
-function luamark.timeit(func: fun():any|{ [string]: fun():any }, rounds?: integer, max_time?: integer)
+function luamark.timeit(func: fun():any|{ [string]: fun():any }, rounds?: integer, max_time?: number)
   -> { [string]: any }|{ [string]: { [string]: any } }
 ```
 
@@ -20,7 +20,7 @@ Benchmarks a function for execution time. The time is represented in seconds.
 ## memit
 
 ```lua
-function luamark.memit(func: fun():any|{ [string]: fun():any }, rounds?: number, max_time?: integer)
+function luamark.memit(func: fun():any|{ [string]: fun():any }, rounds?: number, max_time?: number)
   -> { [string]: any }|{ [string]: { [string]: any } }
 ```
 
