@@ -147,7 +147,13 @@ local function format_row(stats)
    for name, value in pairs(stats) do
       if name == "ratio" then
          row[name] = string.format("%.2f", value)
-      elseif name == "min" or name == "max" or name == "mean" or name == "stddev" or name == "median" then
+      elseif
+         name == "min"
+         or name == "max"
+         or name == "mean"
+         or name == "stddev"
+         or name == "median"
+      then
          row[name] = format_number(value, precision) .. " " .. unit
       else
          row[name] = tostring(value)
@@ -169,7 +175,8 @@ function luamark.print_summary(benchmark_results)
       return a.rank < b.rank
    end)
 
-   local headers = { "name", "rank", "ratio", "min", "max", "mean", "stddev", "median", "rounds", "iterations" }
+   local headers =
+      { "name", "rank", "ratio", "min", "max", "mean", "stddev", "median", "rounds", "iterations" }
 
    -- Calculate column widths
    local widths = {}
