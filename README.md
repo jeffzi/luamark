@@ -1,7 +1,6 @@
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
 [![Busted](https://github.com/jeffzi/luamark/actions/workflows/busted.yml/badge.svg)](https://github.com/jeffzi/luamark/actions/workflows/busted.yml)
 [![Luacheck](https://github.com/jeffzi/luamark/actions/workflows/luacheck.yml/badge.svg)](https://github.com/jeffzi/luamark/actions/workflows/luacheck.yml)
-[![GitHub tag (latest SemVer)](https://img.shields.io/github/v/tag/lunarmodules/busted?label=Tag&logo=GitHub)](https://github.com/lunarmodules/busted/releases)
 [![Luarocks](https://img.shields.io/luarocks/v/jeffzi/luamark?label=Luarocks&logo=Lua)](https://luarocks.org/modules/jeffzi/luamark)
 
 # LuaMark
@@ -10,11 +9,11 @@ LuaMark is a lightweight, portable microbenchmarking library designed for the Lu
 
 ## Features
 
-- **Time Measurement**: Accurately measure the time taken for code execution.
-- **Memory Usage Tracking**: Evaluate the memory footprint of your Lua functions.
-- **Statistical Analysis**: Get detailed statistical insights such as min, max, mean, and standard deviation for your benchmarks.
-- **Configurable Benchmarks**: Tailor benchmark runs to your needs, including the number of runs and warm-up iterations for precise and consistent results.
-- **Support for Multiple Clock Modules**: LuaMark supports a range of clock modules like [Chronos](https://github.com/ldrumm/chronos), [LuaPosix](https://github.com/luaposix/luaposix), and [LuaSocket](https://github.com/lunarmodules/luasocket), offering flexibility and enhanced precision in time measurement.
+- **Time Measurement**: Accurately measure the execution time of your code with precision.
+- **Memory Usage Tracking**: Monitor the memory footprint of Lua functions to manage resource utilization.
+- **Statistical Analysis**: Gain comprehensive statistical insights, including minimum, maximum, mean, and standard deviation for your benchmarks.
+- **Minimal configuration**: LuaMark is designed to be turnkey and user-friendly allowing you to focus on optimizing your Lua code without the hassle of complex setup processes.
+- **Support for Multiple Clock Modules**: LuaMark supports a range of clock modules like [Chronos](https://github.com/chronos-timetravel/chronos), [LuaPosix](https://github.com/luaposix/luaposix), and [LuaSocket](https://github.com/diegonehab/luasocket), offering flexibility and enhanced precision in time measurement.
 
 ## Installation
 
@@ -49,11 +48,10 @@ local time_stats = luamark.timeit({
 })
 luamark.print_summary(time_stats)
 
--- Name  Rank  Ratio  Min            Max            Mean           Stddev         Median         Rounds  Iterations
--- ----  ----  -----  -------------  -------------  -------------  -------------  -------------  ------  ----------
--- n=1   1     1.00   0.000000083 s  0.000000375 s  0.000000175 s  0.000000123 s  0.000000125 s  5       1
--- n=15  2     2.19   0.000000375 s  0.000000417 s  0.000000383 s  0.000000019 s  0.000000375 s  5       1
--- 0.000000254 s ±0.000000037 s per round (10 rounds)
+-- Name  Rank  Ratio  Min            Max            Mean           Stddev         Median         Rounds   Iterations
+-- ----  ----  -----  -------------  -------------  -------------  -------------  -------------  -------  ----------
+-- n=1   1     1.00   0.000000001 s  0.000017333 s  0.000000118 s  0.000000128 s  0.000000125 s  1000000  1
+-- n=15  2     4.26   0.000000375 s  0.000020042 s  0.000000505 s  0.000000336 s  0.0000005 s    558137   1
 
 local time_stats = luamark.timeit(function()
    factorial(10)
