@@ -21,6 +21,10 @@ local MAX_INT = 2 ^ 1023
 
 local clock, clock_precision
 
+local function get_min_clocktime()
+   return (10 ^ -clock_precision)
+end
+
 ---Get clock and clock precision from a module name.
 ---@param modname string
 ---@return (fun(): number)|nil
@@ -47,7 +51,7 @@ local function set_clock(modname)
          clock_precision = 9
          clock = function()
             local time_spec = lib.clock_gettime(lib.CLOCK_MONOTONIC)
-            return time_spec.tv_sec + time_spec.tv_nsec * clock_precision
+            return time_spec.tv_sec + time_spec.tv_nsec * get_min_clocktime()
          end
       end
    elseif modname == "socket" then
@@ -67,10 +71,6 @@ if not clock then
 end
 if not clock then
    set_clock("os")
-end
-
-local function get_min_clocktime()
-   return (10 ^ -clock_precision)
 end
 
 -- Expose private to busted
