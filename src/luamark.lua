@@ -209,7 +209,9 @@ function luamark.print_summary(benchmark_results)
    -- Print data rows
    for _, row in pairs(pretty_rows) do
       for i, header in ipairs(headers) do
-         io.write(pad(row[header], widths[i]) .. "  ")
+         if row[header] then
+            io.write(pad(row[header], widths[i]) .. "  ")
+         end
       end
       io.write("\n")
    end
@@ -355,15 +357,30 @@ end
 ---@param measure function The measurement function to use (e.g., measure_time or measure_memory).
 ---@param rounds? number The number of rounds, i.e. set of runs
 ---@param max_time? number Maximum run time. It may be exceeded if test function is very slow.
+---@param setup? fun():any Function executed before computing each benchmark value.
+---@param teardown? fun():any Function executed after computing each benchmark value.
 ---@param disable_gc? boolean Whether to disable garbage collection during the benchmark.
 ---@return table # A table containing the results of the benchmark .
-local function single_benchmark(func, measure, rounds, max_time, disable_gc, unit, precision)
+local function single_benchmark(
+   func,
+   measure,
+   rounds,
+   max_time,
+   setup,
+   teardown,
+   disable_gc,
+   unit,
+   precision
+)
    assert(
       type(func) == "function" or type("function") == "table",
       "'func' must be a function or a table of functions indexed by name."
    )
    assert(not rounds or rounds > 0, "'rounds' must be > 0.")
    assert(not max_time or max_time > 0, "'max_time' must be > 0.")
+   assert(not setup or type(setup) == "function")
+   assert(not teardown or type(teardown) == "function")
+
    disable_gc = disable_gc or true
 
    local iterations = calibrate_iterations(func)
@@ -385,6 +402,10 @@ local function single_benchmark(func, measure, rounds, max_time, disable_gc, uni
 
    repeat
       completed_rounds = completed_rounds + 1
+
+      if setup then
+         setup()
+      end
       start = clock()
 
       samples[completed_rounds] = math_round(measure(inner_loop) / iterations, precision)
@@ -395,6 +416,10 @@ local function single_benchmark(func, measure, rounds, max_time, disable_gc, uni
          -- Wait 1 round to gather a sample of loop duration,
          -- as memit can slow down the loop significantly because of the collectgarbage calls.
          rounds, max_time = calibrate_stop(duration)
+      end
+
+      if teardown then
+         teardown()
       end
    until (max_time and total_duration >= (max_time - duration))
       or (rounds and completed_rounds == rounds)
@@ -439,18 +464,32 @@ end
 ---@param func (fun(): any)|({[string]: fun(): any}) A single zero-argument function or a table of zero-argument functions indexed by name.
 ---@param rounds? integer The number of times to run the benchmark. Defaults to a predetermined number if not provided.
 ---@param max_time? number Maximum run time. It may be exceeded if test function is very slow.
+---@param setup? fun():any Function executed before computing each benchmark value.
+---@param teardown? fun():any Function executed after computing each benchmark value.
 ---@return {[string]:any}|{[string]:{[string]: any}} # A table of statistical measurements for the function(s) benchmarked, indexed by the function name if multiple functions were given.
-function luamark.timeit(func, rounds, max_time)
-   return benchmark(func, luamark.measure_time, rounds, max_time, true, "s", clock_precision)
+function luamark.timeit(func, rounds, max_time, setup, teardown)
+   return benchmark(
+      func,
+      luamark.measure_time,
+      rounds,
+      max_time,
+      setup,
+      teardown,
+      true,
+      "s",
+      clock_precision
+   )
 end
 
 --- Benchmarks a function for memory usage. The memory usage is represented in kilobytes.
 ---@param func (fun(): any)|({[string]: fun(): any}) A single zero-argument function or a table of zero-argument functions indexed by name.
 ---@param rounds? number The number of times to run the benchmark. Defaults to a predetermined number if not provided.
 ---@param max_time? number Maximum run time. It may be exceeded if test function is very slow.
+---@param setup? fun():any Function executed before computing each benchmark value.
+---@param teardown? fun():any Function executed after computing each benchmark value.
 ---@return {[string]:any}|{[string]:{[string]: any}} # A table of statistical measurements for the function(s) benchmarked, indexed by the function name if multiple functions were given.
-function luamark.memit(func, rounds, max_time)
-   return benchmark(func, luamark.measure_memory, rounds, max_time, false, "kb", 4)
+function luamark.memit(func, rounds, max_time, setup, teardown)
+   return benchmark(func, luamark.measure_memory, rounds, max_time, setup, teardown, false, "kb", 4)
 end
 
 return luamark
