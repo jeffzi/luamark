@@ -120,6 +120,32 @@ for _, modname in ipairs(MODULES) do
                -- Tolerance for calculating stats, garbage collection, etc.
                assert.is_near(expected_max_time, actual_time, 0.3)
             end)
+
+            -- ----------------------------------------------------------------------------
+            -- test setup/teardown
+            -- ----------------------------------------------------------------------------
+
+            test("setup " .. bench_suffix, function()
+               local calls = 0
+
+               local function counter()
+                  calls = calls + 1
+               end
+
+               local stats = benchmark(noop, 1, nil, counter)
+               assert.is_equals(calls, 1)
+            end)
+
+            test("teardown " .. bench_suffix, function()
+               local calls = 0
+
+               local function counter()
+                  calls = calls + 1
+               end
+
+               local stats = benchmark(noop, 1, nil, nil, counter)
+               assert.is_equals(calls, 1)
+            end)
          end
       end)
 
