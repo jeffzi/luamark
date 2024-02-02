@@ -73,14 +73,6 @@ if not clock then
    set_clock("os")
 end
 
--- Expose private to busted
--- luacheck:ignore 113
-if _TEST then
-   luamark.set_clock = set_clock
-   luamark.get_min_clocktime = get_min_clocktime
-   luamark.CALIBRATION_PRECISION = CALIBRATION_PRECISION
-end
-
 -- ----------------------------------------------------------------------------
 -- Utils
 -- ----------------------------------------------------------------------------
@@ -99,18 +91,6 @@ local function math_round(num, precision)
       rounded = math.ceil(num * mul - half) / mul
    end
    return math.max(rounded, 10 ^ -precision)
-end
-
---- Return a function which runs `func` `n` times when called.
----@param func fun(any): any A zero-argument function.
----@param n number The number of times to run the function.
----@return fun(any): any
-local function rerun(func, n)
-   return function(...)
-      for _ = 1, n do
-         func(...)
-      end
-   end
 end
 
 -- ----------------------------------------------------------------------------
@@ -294,38 +274,61 @@ end
 
 -- ----------------------------------------------------------------------------
 -- Benchmark
--- ----------------------------------------------------------------------------
+-- -----------------------------------------------s-----------------------------
 
---- Measures the time taken to execute a function once.
----@param func fun(): any The zero-arg function to measure.
----@return number # The time taken to execute the function (in seconds).
-function luamark.measure_time(func)
-   local start = clock()
-   func()
-   return clock() - start
+---@param func fun(): any
+---@param iterations? integer
+---@param setup? fun():any
+---@param teardown? fun():any
+---@return number
+local function _measure(measure_func, func, iterations, setup, teardown)
+   local sum = 0
+   for _ = 1, (iterations or 1) do
+      if setup then
+         setup()
+      end
+
+      local start = measure_func()
+      func()
+      sum = sum + measure_func() - start
+
+      if teardown then
+         teardown()
+      end
+   end
+   return sum
 end
 
---- Measures the memory used by a function.
----@param func fun(): any The zero-arg function to measure.
----@return number # The amount of memory used by the function (in kilobytes).
-function luamark.measure_memory(func)
-   collectgarbage("collect")
-   local start_memory = collectgarbage("count")
-   func()
-   return collectgarbage("count") - start_memory
+---@param func fun(): any
+---@param iterations? integer
+---@param setup? fun():any
+---@param teardown? fun():any
+---@return number
+local function measure_time(func, iterations, setup, teardown)
+   return _measure(clock, func, iterations, setup, teardown)
+end
+
+---@param func fun(): any
+---@param iterations? integer
+---@param setup? fun():any
+---@param teardown? fun():any
+---@return number
+local function measure_memory(func, iterations, setup, teardown)
+   return _measure(function()
+      return collectgarbage("count")
+   end, func, iterations, setup, teardown)
 end
 
 --- Determine the round parameters
 ---@param func function The function to benchmark.
 ---@return number # Duration of a round.
-local function calibrate_iterations(func)
+local function calibrate_iterations(func, setup, teardown)
    local min_time = get_min_clocktime() * CALIBRATION_PRECISION
 
    local duration
    local iterations = 1
    while true do
-      local repeated_func = rerun(func, iterations)
-      duration = luamark.measure_time(repeated_func)
+      duration = measure_time(func, iterations, setup, teardown)
       if duration >= min_time then
          break
       end
@@ -380,14 +383,11 @@ local function single_benchmark(
    assert(not max_time or max_time > 0, "'max_time' must be > 0.")
    assert(not setup or type(setup) == "function")
    assert(not teardown or type(teardown) == "function")
-
    disable_gc = disable_gc or true
 
-   local iterations = calibrate_iterations(func)
-   local inner_loop = rerun(func, iterations)
-
+   local iterations = calibrate_iterations(func, setup, teardown)
    for _ = 1, WARMUPS do
-      inner_loop()
+      measure(func, iterations, setup, teardown)
    end
 
    local timestamp = os.date("!%Y-%m-%d %H:%M:%SZ")
@@ -402,13 +402,10 @@ local function single_benchmark(
 
    repeat
       completed_rounds = completed_rounds + 1
-
-      if setup then
-         setup()
-      end
       start = clock()
 
-      samples[completed_rounds] = math_round(measure(inner_loop) / iterations, precision)
+      samples[completed_rounds] =
+         math_round(measure(func, iterations, setup, teardown) / iterations, precision)
 
       duration = clock() - start
       total_duration = total_duration + duration
@@ -416,10 +413,6 @@ local function single_benchmark(
          -- Wait 1 round to gather a sample of loop duration,
          -- as memit can slow down the loop significantly because of the collectgarbage calls.
          rounds, max_time = calibrate_stop(duration)
-      end
-
-      if teardown then
-         teardown()
       end
    until (max_time and total_duration >= (max_time - duration))
       or (rounds and completed_rounds == rounds)
@@ -464,13 +457,13 @@ end
 ---@param func (fun(): any)|({[string]: fun(): any}) A single zero-argument function or a table of zero-argument functions indexed by name.
 ---@param rounds? integer The number of times to run the benchmark. Defaults to a predetermined number if not provided.
 ---@param max_time? number Maximum run time. It may be exceeded if test function is very slow.
----@param setup? fun():any Function executed before computing each benchmark value.
----@param teardown? fun():any Function executed after computing each benchmark value.
+---@param setup? fun():any Function executed before the measured function.
+---@param teardown? fun():any Function executed after the measured function.
 ---@return {[string]:any}|{[string]:{[string]: any}} # A table of statistical measurements for the function(s) benchmarked, indexed by the function name if multiple functions were given.
 function luamark.timeit(func, rounds, max_time, setup, teardown)
    return benchmark(
       func,
-      luamark.measure_time,
+      measure_time,
       rounds,
       max_time,
       setup,
@@ -485,11 +478,21 @@ end
 ---@param func (fun(): any)|({[string]: fun(): any}) A single zero-argument function or a table of zero-argument functions indexed by name.
 ---@param rounds? number The number of times to run the benchmark. Defaults to a predetermined number if not provided.
 ---@param max_time? number Maximum run time. It may be exceeded if test function is very slow.
----@param setup? fun():any Function executed before computing each benchmark value.
----@param teardown? fun():any Function executed after computing each benchmark value.
+---@param setup? fun():any Function executed before the measured function.
+---@param teardown? fun():any Function executed after the measured function.
 ---@return {[string]:any}|{[string]:{[string]: any}} # A table of statistical measurements for the function(s) benchmarked, indexed by the function name if multiple functions were given.
 function luamark.memit(func, rounds, max_time, setup, teardown)
-   return benchmark(func, luamark.measure_memory, rounds, max_time, setup, teardown, false, "kb", 4)
+   return benchmark(func, measure_memory, rounds, max_time, setup, teardown, false, "kb", 4)
+end
+
+-- Expose private to busted
+-- luacheck:ignore 113
+if _TEST then
+   luamark.set_clock = set_clock
+   luamark.get_min_clocktime = get_min_clocktime
+   luamark.CALIBRATION_PRECISION = CALIBRATION_PRECISION
+   luamark.measure_time = measure_time
+   luamark.measure_memory = measure_memory
 end
 
 return luamark

@@ -125,26 +125,25 @@ for _, modname in ipairs(MODULES) do
             -- test setup/teardown
             -- ----------------------------------------------------------------------------
 
-            test("setup " .. bench_suffix, function()
-               local calls = 0
+            test("setup / teardown" .. bench_suffix, function()
+               local counter_calls, setup_calls, teardown_calls = 0, 0, 0
 
                local function counter()
-                  calls = calls + 1
+                  counter_calls = counter_calls + 1
                end
 
-               local stats = benchmark(noop, 1, nil, counter)
-               assert.is_equals(calls, 1)
-            end)
-
-            test("teardown " .. bench_suffix, function()
-               local calls = 0
-
-               local function counter()
-                  calls = calls + 1
+               local function setup_counter()
+                  setup_calls = setup_calls + 1
                end
 
-               local stats = benchmark(noop, 1, nil, nil, counter)
-               assert.is_equals(calls, 1)
+               local function teardown_counter()
+                  teardown_calls = teardown_calls + 1
+               end
+
+               local stats = benchmark(counter, 1, nil, setup_counter, teardown_counter)
+               assert.is_true(setup_calls > 0)
+               assert.is_equals(setup_calls, teardown_calls)
+               assert.is_equals(teardown_calls, counter_calls)
             end)
          end
       end)
