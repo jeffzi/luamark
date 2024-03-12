@@ -152,7 +152,7 @@ function luamark.print_summary(benchmark_results)
       table.insert(pretty_rows, formatted)
    end
    table.sort(pretty_rows, function(a, b)
-      return a.rank < b.rank
+      return tonumber(a.rank) < tonumber(b.rank)
    end)
 
    local headers =
