@@ -329,3 +329,27 @@ describe("rank", function()
       end)
    end)
 end)
+
+describe("format_stat", function()
+   setup(function()
+      _G._TEST = true
+      luamark = require("../src/luamark")
+   end)
+
+   test("converts kilobytes to terabytes", function()
+      local tb, gb = 1024 ^ 3, 1024 ^ 2
+      assert.are.equal("1.5TB", luamark.format_stat(tb + 512 * gb, "kb"))
+   end)
+
+   test("convert s to ns", function()
+      assert.are.equal("5ns", luamark.format_stat(5 / 1e9, "s"))
+   end)
+
+   test("round < 1ns", function()
+      assert.are.equal("0ns", luamark.format_stat(0.5 / 1e9, "s"))
+   end)
+
+   test("round < 1B", function()
+      assert.are.equal("0B", luamark.format_stat(0.25 / 1024, "kb"))
+   end)
+end)
