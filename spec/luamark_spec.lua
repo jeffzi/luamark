@@ -206,7 +206,7 @@ for _, modname in ipairs(MODULES) do
                   t = nil
                end,
             }
-            local all_stats = luamark.memit(funcs, 100)
+            local all_stats = luamark.memit(funcs, { rounds = 100 })
 
             for func_name, stats in pairs(all_stats) do
                local single_call_memory = luamark.measure_memory(funcs[func_name])
