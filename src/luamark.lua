@@ -174,13 +174,28 @@ function luamark.summarize(benchmark_results)
       return content .. string.rep(" ", padding)
    end
 
+   local function center(content, expected_width)
+      local total_padding_size = expected_width - string.len(content)
+      if total_padding_size < 0 then
+         total_padding_size = 0
+      end
+
+      local left_padding_size = math.floor(total_padding_size / 2)
+      local right_padding_size = total_padding_size - left_padding_size
+
+      local left_padding = string.rep(" ", left_padding_size)
+      local right_padding = string.rep(" ", right_padding_size)
+
+      return left_padding .. content .. right_padding
+   end
+
    local lines = {}
 
    -- Header row
    local cells = {}
    for i, header in ipairs(headers) do
-      local title_header = header:gsub("^%l", string.upper)
-      table.insert(cells, pad(title_header, widths[i]) .. "  ")
+      header = header:gsub("^%l", string.upper)
+      table.insert(cells, center(header, widths[i]) .. "  ")
    end
    table.insert(lines, table.concat(cells))
 
