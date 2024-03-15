@@ -137,11 +137,10 @@ local function format_stat(value, base_unit)
    for _, unit_tbl in ipairs(units) do
       local unit, factor = unit_tbl[1], unit_tbl[2]
       if value >= factor then
-         local pattern = factor == 1 and "%d" or "%.2f"
-         return trim_zeroes(string.format(pattern, value / factor)) .. unit
+         return trim_zeroes(string.format("%.2f", value / factor)) .. unit
       end
    end
-   return string.format("%d", value) .. base_unit
+   return string.format("%d", math.floor(value)) .. base_unit
 end
 
 --- Formats statistical measurements into a readable string.
