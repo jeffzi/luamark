@@ -46,6 +46,10 @@ local time_stats = luamark.timeit({
       factorial(15)
    end,
 })
+
+-- Results can be accessed as a table or as a string via the `tostring` metamethod.
+print(type(time_stats))
+-- table
 print(time_stats)
 -- Name  Rank  Ratio      Mean         Median         Min           Max          Stddev     Rounds
 -- ----  ----  -----  ------------  ------------  ------------  ------------  ------------  -------
@@ -55,12 +59,20 @@ print(time_stats)
 local time_stats = luamark.timeit(function()
    factorial(10)
 end, { rounds = 10 })
+
+-- Results can be accessed as a table or as a string via the `tostring` metamethod.
+print(type(time_stats))
+-- table
 print(time_stats)
 -- 0.000002317s ±0.000005058s per round (10 rounds)
 
 local mem_stats = luamark.memit(function()
    local tbl = { "hello", "world" }
 end)
+
+-- Results can be accessed as a table or as a string via the `tostring` metamethod.
+print(type(mem_stats))
+-- table
 print(mem_stats)
 -- 0.0001kb ±0.0008kb per round (1000000 rounds)
 ```
