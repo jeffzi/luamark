@@ -51,10 +51,10 @@ local time_stats = luamark.timeit({
 print(type(time_stats))
 -- table
 print(time_stats)
--- Name  Rank  Ratio  Mean   Median   Min      Max     Stddev  Rounds
--- ----  ----  -----  -----  ------  -----  ---------  ------  -------
--- n=1   1     1.00   78ns   83ns    1ns    14.67µs   52ns    1000000
--- n=15  2     5.88   461ns  458ns   333ns  679.25µs  749ns   1000000
+-- Name  Rank  Ratio   Mean    Median  Min    Max     Stddev   Rounds
+-- ----  ----  -----  -------  ------  ---  --------  -------  -------
+-- n=1   1     1.00   17.28ns  1ns     1ns  14.21us   47.55ns  1000000
+-- n=15  2     3.81   65.93ns  42ns    1ns  117.21us  222.7ns  1000000
 
 local time_stats = luamark.timeit(function()
    factorial(10)
