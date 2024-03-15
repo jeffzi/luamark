@@ -156,8 +156,7 @@ function luamark.summarize(benchmark_results)
       return tonumber(a.rank) < tonumber(b.rank)
    end)
 
-   local headers =
-      { "name", "rank", "ratio", "min", "max", "mean", "stddev", "median", "rounds", "iterations" }
+   local headers = { "name", "rank", "ratio", "mean", "median", "min", "max", "stddev", "rounds" }
 
    -- Calculate column widths
    local widths = {}
