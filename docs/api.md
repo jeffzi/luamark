@@ -42,15 +42,14 @@ Benchmarks a function for memory usage. The memory usage is represented in kilob
 
 @_return_ — A table of statistical measurements for the function(s) benchmarked, indexed by the function name if multiple functions were given.
 
-## print_summary
+## summarize
 
 ```lua
-function luamark.print_summary(benchmark_results: { [string]: { [string]: any } })
+function luamark.summarize(benchmark_results: { [string]: { [string]: any } })
+  -> string
 ```
 
-Print a summary of multiple benchmarks.
-
-@_param_ `benchmark_results` — The benchmark results to summarize, indexed by name.
+Return a string summarizing the results of multiple benchmarks.
 
 ## rank
 
