@@ -142,9 +142,10 @@ local function format_row(stats)
    return row
 end
 
----Print a summary of multiple benchmarks.
+---Return a string summarizing the results of multiple benchmarks.
 ---@param benchmark_results {[string]:{[string]: any}} The benchmark results to summarize, indexed by name.
-function luamark.print_summary(benchmark_results)
+---@return string
+function luamark.summarize(benchmark_results)
    local pretty_rows = {}
    for benchmark_name, stats in pairs(benchmark_results) do
       local formatted = format_row(stats)
@@ -173,28 +174,35 @@ function luamark.print_summary(benchmark_results)
       return content .. string.rep(" ", padding)
    end
 
-   -- Print header row
+   local lines = {}
+
+   -- Header row
+   local cells = {}
    for i, header in ipairs(headers) do
       local title_header = header:gsub("^%l", string.upper)
-      io.write(pad(title_header, widths[i]) .. "  ")
+      table.insert(cells, pad(title_header, widths[i]) .. "  ")
    end
-   io.write("\n")
+   table.insert(lines, table.concat(cells))
 
-   -- Print header separator
+   -- Header separator
+   cells = {}
    for i, _ in ipairs(headers) do
-      io.write(string.rep("-", widths[i]) .. "  ")
+      table.insert(cells, string.rep("-", widths[i]) .. "  ")
    end
-   io.write("\n")
+   table.insert(lines, table.concat(cells))
 
-   -- Print data rows
+   -- Data rows
    for _, row in pairs(pretty_rows) do
+      cells = {}
       for i, header in ipairs(headers) do
          if row[header] then
-            io.write(pad(row[header], widths[i]) .. "  ")
+            table.insert(cells, pad(row[header], widths[i]) .. "  ")
          end
       end
-      io.write("\n")
+      table.insert(lines, table.concat(cells))
    end
+
+   return table.concat(lines, "\n")
 end
 
 -- ----------------------------------------------------------------------------
@@ -450,7 +458,13 @@ local function benchmark(funcs, ...)
       results[name] = single_benchmark(func, ...)
    end
 
-   return luamark.rank(results, "mean")
+   local stats = luamark.rank(results, "mean")
+   setmetatable(stats, {
+      __tostring = function(self)
+         return luamark.summarize(self)
+      end,
+   })
+   return stats
 end
 
 --- Benchmarks a function for execution time. The time is represented in seconds.
