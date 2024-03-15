@@ -134,7 +134,7 @@ local function format_row(stats)
          or name == "stddev"
          or name == "median"
       then
-         row[name] = format_number(value, precision) .. " " .. unit
+         row[name] = format_number(value, precision) .. unit
       else
          row[name] = tostring(value)
       end
