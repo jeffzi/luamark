@@ -103,7 +103,7 @@ local TIME_UNITS = {
    { "m", 60 * 1e9 },
    { "s", 1e9 },
    { "ms", 1e6 },
-   { "µs", 1e3 },
+   { "us", 1e3 },
    { "ns", 1 },
 }
 
@@ -134,10 +134,10 @@ local function format_stat(value, base_unit)
       value = value * 1024
    end
 
-   for _, unit_tbl in ipairs(units) do
-      local unit, factor = unit_tbl[1], unit_tbl[2]
+   for _, unit in ipairs(units) do
+      local symbol, factor = unit[1], unit[2]
       if value >= factor then
-         return trim_zeroes(string.format("%.2f", value / factor)) .. unit
+         return trim_zeroes(string.format("%.2f", value / factor)) .. symbol
       end
    end
    return string.format("%d", math.floor(value)) .. base_unit
@@ -177,6 +177,26 @@ local function format_row(stats)
    return row
 end
 
+local function pad(content, width)
+   local padding = width - string.len(content)
+   return content .. string.rep(" ", padding)
+end
+
+local function center(content, expected_width)
+   local total_padding_size = expected_width - string.len(content)
+   if total_padding_size < 0 then
+      total_padding_size = 0
+   end
+
+   local left_padding_size = math.floor(total_padding_size / 2)
+   local right_padding_size = total_padding_size - left_padding_size
+
+   local left_padding = string.rep(" ", left_padding_size)
+   local right_padding = string.rep(" ", right_padding_size)
+
+   return left_padding .. content .. right_padding
+end
+
 ---Return a string summarizing the results of multiple benchmarks.
 ---@param benchmark_results {[string]:{[string]: any}} The benchmark results to summarize, indexed by name.
 ---@return string
@@ -196,31 +216,11 @@ function luamark.summarize(benchmark_results)
    -- Calculate column widths
    local widths = {}
    for i, header in ipairs(headers) do
-      widths[i] = #header
+      widths[i] = string.len(header)
       for _, row in pairs(pretty_rows) do
          local cell = tostring(row[header] or "")
-         widths[i] = math.max(widths[i], #cell)
+         widths[i] = math.max(widths[i], string.len(cell))
       end
-   end
-
-   local function pad(content, width)
-      local padding = width - #content
-      return content .. string.rep(" ", padding)
-   end
-
-   local function center(content, expected_width)
-      local total_padding_size = expected_width - string.len(content)
-      if total_padding_size < 0 then
-         total_padding_size = 0
-      end
-
-      local left_padding_size = math.floor(total_padding_size / 2)
-      local right_padding_size = total_padding_size - left_padding_size
-
-      local left_padding = string.rep(" ", left_padding_size)
-      local right_padding = string.rep(" ", right_padding_size)
-
-      return left_padding .. content .. right_padding
    end
 
    local lines = {}
@@ -245,10 +245,10 @@ function luamark.summarize(benchmark_results)
       cells = {}
       for i, header in ipairs(headers) do
          if row[header] then
-            table.insert(cells, pad(row[header], widths[i]) .. "  ")
+            table.insert(cells, pad(row[header], widths[i]))
          end
       end
-      table.insert(lines, table.concat(cells))
+      table.insert(lines, table.concat(cells, "  "))
    end
 
    return table.concat(lines, "\n")
