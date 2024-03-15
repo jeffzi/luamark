@@ -93,36 +93,72 @@ local function math_round(num, precision)
    return math.max(rounded, 10 ^ -precision)
 end
 
+---@alias default_unit `s` | `kb`
+
 -- ----------------------------------------------------------------------------
--- I/O
+-- Pretty Printing
 -- ----------------------------------------------------------------------------
 
----@param num integer
----@param precision integer
+local TIME_UNITS = {
+   { "m", 60 * 1e9 },
+   { "s", 1e9 },
+   { "ms", 1e6 },
+   { "µs", 1e3 },
+   { "ns", 1 },
+}
+
+local MEMORY_UNITS = {
+   { "TB", 1024 ^ 4 },
+   { "GB", 1024 ^ 3 },
+   { "MB", 1024 ^ 2 },
+   { "kB", 1024 },
+   { "B", 1 },
+}
+
+local function trim_zeroes(str)
+   return str:gsub("%.?0+$", "")
+end
+
+---@param value integer
+---@param base_unit default_unit
 ---@return string
-local function format_number(num, precision)
-   local formatted, _ = string.format("%." .. precision .. "f", num):gsub("%.?0+$", "")
-   return formatted
+local function format_stat(value, base_unit)
+   local units
+   if base_unit == "s" then
+      units = TIME_UNITS
+      base_unit = "ns"
+      value = value * 1e9
+   else
+      units = MEMORY_UNITS
+      base_unit = "B"
+      value = value * 1024
+   end
+
+   for _, unit_tbl in ipairs(units) do
+      local unit, factor = unit_tbl[1], unit_tbl[2]
+      if value >= factor then
+         local pattern = factor == 1 and "%d" or "%.2f"
+         return trim_zeroes(string.format(pattern, value / factor)) .. unit
+      end
+   end
+   return string.format("%d", value) .. base_unit
 end
 
 --- Formats statistical measurements into a readable string.
 ---@param stats table The statistical measurements to format.
----@param unit string The unit of measurement.
+---@param unit default_unit
 ---@return string # A formatted string representing the statistical metrics.
-local function __tostring_stats(stats, unit, precision)
+local function __tostring_stats(stats, unit)
    return string.format(
-      "%s%s ±%s%s per round (%d rounds)",
-      format_number(stats.mean, precision),
-      unit,
-      format_number(stats.stddev, precision),
-      unit,
+      "%s ± %s per round (%d rounds)",
+      format_stat(stats.mean, unit),
+      format_stat(stats.stddev, unit),
       stats.rounds
    )
 end
 
 local function format_row(stats)
    local unit = stats.unit
-   local precision = stats.precision
    local row = {}
    for name, value in pairs(stats) do
       if name == "ratio" then
@@ -134,7 +170,7 @@ local function format_row(stats)
          or name == "stddev"
          or name == "median"
       then
-         row[name] = format_number(value, precision) .. unit
+         row[name] = format_stat(value, unit)
       else
          row[name] = tostring(value)
       end
@@ -380,22 +416,24 @@ end
 --- Runs a benchmark on a function using a specified measurement method.
 ---@param func function The function to benchmark.
 ---@param measure function The measurement function to use (e.g., measure_time or measure_memory).
+---@param disable_gc boolean Whether to disable garbage collection during the benchmark.
+---@param unit default_unit The unit of the measurement result.
+---@param precision number The clock precision of the measurement result.
 ---@param rounds? number The number of rounds, i.e. set of runs
 ---@param max_time? number Maximum run time. It may be exceeded if test function is very slow.
 ---@param setup? fun():any Function executed before computing each benchmark value.
 ---@param teardown? fun():any Function executed after computing each benchmark value.
----@param disable_gc? boolean Whether to disable garbage collection during the benchmark.
 ---@return table # A table containing the results of the benchmark .
 local function single_benchmark(
    func,
    measure,
+   disable_gc,
+   unit,
+   precision,
    rounds,
    max_time,
    setup,
-   teardown,
-   disable_gc,
-   unit,
-   precision
+   teardown
 )
    assert(
       type(func) == "function" or type("function") == "table",
@@ -448,11 +486,10 @@ local function single_benchmark(
    results.warmups = WARMUPS
    results.timestamp = timestamp
    results.unit = unit
-   results.precision = precision
 
    setmetatable(results, {
       __tostring = function(self)
-         return __tostring_stats(self, unit, precision)
+         return __tostring_stats(self, unit)
       end,
    })
 
@@ -514,13 +551,13 @@ function luamark.timeit(func, opts)
    return benchmark(
       func,
       measure_time,
+      true,
+      "s",
+      clock_precision,
       opts.rounds,
       opts.max_time,
       opts.setup,
-      opts.teardown,
-      true,
-      "s",
-      clock_precision
+      opts.teardown
    )
 end
 
@@ -538,13 +575,13 @@ function luamark.memit(func, opts)
    return benchmark(
       func,
       measure_memory,
+      false,
+      "kb",
+      4,
       opts.rounds,
       opts.max_time,
       opts.setup,
-      opts.teardown,
-      false,
-      "kb",
-      4
+      opts.teardown
    )
 end
 
@@ -556,6 +593,7 @@ if _TEST then
    luamark.CALIBRATION_PRECISION = CALIBRATION_PRECISION
    luamark.measure_time = measure_time
    luamark.measure_memory = measure_memory
+   luamark.format_stat = format_stat
 end
 
 return luamark

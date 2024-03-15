@@ -51,10 +51,10 @@ local time_stats = luamark.timeit({
 print(type(time_stats))
 -- table
 print(time_stats)
--- Name  Rank  Ratio      Mean         Median         Min           Max          Stddev     Rounds
--- ----  ----  -----  ------------  ------------  ------------  ------------  ------------  -------
--- n=1   1     1.00   0.000000019s  0.000000001s  0.000000001s  0.000054083s  0.000000094s  1000000
--- n=15  2     2.80   0.000000053s  0.000000042s  0.000000001s  0.000042458s  0.000000083s  1000000
+-- Name  Rank  Ratio  Mean   Median   Min      Max     Stddev  Rounds
+-- ----  ----  -----  -----  ------  -----  ---------  ------  -------
+-- n=1   1     1.00   78ns   83ns    1ns    14.67µs   52ns    1000000
+-- n=15  2     5.88   461ns  458ns   333ns  679.25µs  749ns   1000000
 
 local time_stats = luamark.timeit(function()
    factorial(10)
@@ -64,17 +64,20 @@ end, { rounds = 10 })
 print(type(time_stats))
 -- table
 print(time_stats)
--- 0.000002317s ±0.000005058s per round (10 rounds)
+-- 42ns ± 23ns per round (10 rounds)
 
 local mem_stats = luamark.memit(function()
-   local tbl = { "hello", "world" }
+   local tbl = {}
+   for i = 1, 100 do
+      tbl[i] = i
+   end
 end)
 
 -- Results can be accessed as a table or as a string via the `tostring` metamethod.
 print(type(mem_stats))
 -- table
 print(mem_stats)
--- 0.0001kb ±0.0008kb per round (1000000 rounds)
+-- 2.06kB ± 0B per round (533081 rounds)
 ```
 
 ## Understanding Iterations and Rounds in Time Measurement
