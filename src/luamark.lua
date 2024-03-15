@@ -111,7 +111,7 @@ end
 ---@return string # A formatted string representing the statistical metrics.
 local function __tostring_stats(stats, unit, precision)
    return string.format(
-      "%s %s ±%s %s per round (%d rounds)",
+      "%s%s ±%s%s per round (%d rounds)",
       format_number(stats.mean, precision),
       unit,
       format_number(stats.stddev, precision),
@@ -481,21 +481,43 @@ local function benchmark(funcs, ...)
    return stats
 end
 
+local VALID_OPTS = {
+   rounds = "number",
+   max_time = "number",
+   setup = "function",
+   teardown = "function",
+}
+
+local function check_options(opts)
+   for k, v in pairs(opts) do
+      local opt_type = VALID_OPTS[k]
+      if not opt_type then
+         error("Unknown option: " .. k)
+      end
+      if type(v) ~= opt_type then
+         error(string.format("Option '%s' should be %s", k, opt_type))
+      end
+   end
+end
+
 --- Benchmarks a function for execution time. The time is represented in seconds.
 ---@param func (fun(): any)|({[string]: fun(): any}) A single zero-argument function or a table of zero-argument functions indexed by name.
----@param rounds? integer The number of times to run the benchmark. Defaults to a predetermined number if not provided.
----@param max_time? number Maximum run time. It may be exceeded if test function is very slow.
----@param setup? fun():any Function executed before the measured function.
----@param teardown? fun():any Function executed after the measured function.
+---@param opts table Options table which may include rounds, max_time, setup, teardown.
+---   - rounds: number The number of times to run the benchmark. Defaults to a predetermined number if not provided.
+---   - max_time: number Maximum run time. It may be exceeded if test function is very slow.
+---   - setup: fun():any Function executed before the measured function.
+---   - teardown: fun():any Function executed after the measured function.
 ---@return {[string]:any}|{[string]:{[string]: any}} # A table of statistical measurements for the function(s) benchmarked, indexed by the function name if multiple functions were given.
-function luamark.timeit(func, rounds, max_time, setup, teardown)
+function luamark.timeit(func, opts)
+   opts = opts or {}
+   check_options(opts)
    return benchmark(
       func,
       measure_time,
-      rounds,
-      max_time,
-      setup,
-      teardown,
+      opts.rounds,
+      opts.max_time,
+      opts.setup,
+      opts.teardown,
       true,
       "s",
       clock_precision
@@ -504,13 +526,26 @@ end
 
 --- Benchmarks a function for memory usage. The memory usage is represented in kilobytes.
 ---@param func (fun(): any)|({[string]: fun(): any}) A single zero-argument function or a table of zero-argument functions indexed by name.
----@param rounds? number The number of times to run the benchmark. Defaults to a predetermined number if not provided.
----@param max_time? number Maximum run time. It may be exceeded if test function is very slow.
----@param setup? fun():any Function executed before the measured function.
----@param teardown? fun():any Function executed after the measured function.
+---@param opts table Options table which may include rounds, max_time, setup, teardown.
+---   - rounds: number The number of times to run the benchmark. Defaults to a predetermined number if not provided.
+---   - max_time: number Maximum run time. It may be exceeded if test function is very slow.
+---   - setup: fun():any Function executed before the measured function.
+---   - teardown: fun():any Function executed after the measured function.
 ---@return {[string]:any}|{[string]:{[string]: any}} # A table of statistical measurements for the function(s) benchmarked, indexed by the function name if multiple functions were given.
-function luamark.memit(func, rounds, max_time, setup, teardown)
-   return benchmark(func, measure_memory, rounds, max_time, setup, teardown, false, "kb", 4)
+function luamark.memit(func, opts)
+   opts = opts or {}
+   check_options(opts)
+   return benchmark(
+      func,
+      measure_memory,
+      opts.rounds,
+      opts.max_time,
+      opts.setup,
+      opts.teardown,
+      false,
+      "kb",
+      4
+   )
 end
 
 -- Expose private to busted

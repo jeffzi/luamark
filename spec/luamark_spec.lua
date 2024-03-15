@@ -66,12 +66,12 @@ for _, modname in ipairs(MODULES) do
             -- ----------------------------------------------------------------------------
 
             test("single function " .. bench_suffix, function()
-               local stats = benchmark(noop, 1)
+               local stats = benchmark(noop, { rounds = 1 })
                assert_stats_not_nil(stats)
             end)
 
             test("multiple functions " .. bench_suffix, function()
-               local root_stats = benchmark({ a = noop, b = noop }, 1)
+               local root_stats = benchmark({ a = noop, b = noop }, { rounds = 1 })
 
                assert.is_not_nil(root_stats.a)
                assert.is_not_nil(root_stats.b)
@@ -96,7 +96,7 @@ for _, modname in ipairs(MODULES) do
             end
 
             local rounds = 3
-            local stats = benchmark(counter, rounds)
+            local stats = benchmark(counter, { rounds = rounds })
 
             test("count" .. bench_suffix, function()
                assert.are_equal(1, stats.iterations)
@@ -115,7 +115,7 @@ for _, modname in ipairs(MODULES) do
 
                local expected_max_time = 0.5
                local actual_time = luamark.measure_time(function()
-                  benchmark(sleep_250ms, 1e9, expected_max_time)
+                  benchmark(sleep_250ms, { rounds = 1e9, max_time = expected_max_time })
                end)
                -- Tolerance for calculating stats, garbage collection, etc.
                assert.is_near(expected_max_time, actual_time, 0.3)
@@ -140,7 +140,10 @@ for _, modname in ipairs(MODULES) do
                   teardown_calls = teardown_calls + 1
                end
 
-               local stats = benchmark(counter, 1, nil, setup_counter, teardown_counter)
+               local stats = benchmark(
+                  counter,
+                  { rounds = 1, setup = setup_counter, teardown = teardown_counter }
+               )
                assert.is_true(setup_calls > 0)
                assert.is_equals(setup_calls, teardown_calls)
                assert.is_equals(teardown_calls, counter_calls)
@@ -163,7 +166,7 @@ for _, modname in ipairs(MODULES) do
 
          local rounds = 100
 
-         local stats = luamark.timeit(counter, rounds, 1)
+         local stats = luamark.timeit(counter, { rounds = rounds, max_time = 1 })
 
          test("min", function()
             assert.is_near(SLEEP_TIME, stats.min, TIME_TOL)
@@ -236,13 +239,19 @@ describe("error", function()
 
          test("rounds " .. bench_suffix, function()
             assert.has.errors(function()
-               benchmark(function() end, -1)
+               benchmark(function() end, { rounds = -1 })
             end)
          end)
 
          test("max_time" .. bench_suffix, function()
             assert.has.errors(function()
-               benchmark(function() end, nil, -1)
+               benchmark(function() end, { max_time = -1 })
+            end)
+         end)
+
+         test("unknown option " .. bench_suffix, function()
+            assert.has.errors(function()
+               benchmark(function() end, { hello = "world" })
             end)
          end)
 
