@@ -46,7 +46,7 @@ local time_stats = luamark.timeit({
       factorial(15)
    end,
 })
-luamark.print_summary(time_stats)
+print(time_stats)
 
 -- Name  Rank  Ratio  Min            Max            Mean           Stddev         Median         Rounds   Iterations
 -- ----  ----  -----  -------------  -------------  -------------  -------------  -------------  -------  ----------
