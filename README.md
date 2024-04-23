@@ -54,12 +54,12 @@ print(time_stats)
 -- Name  Rank  Ratio  Median   Mean     Min     Max     Stddev   Rounds
 -- ----  ----  -----  ------  -------  -----  -------  --------  -------
 -- n=1   1     1.00   83ns    68.17ns  1ns    15.75us  83.98ns   1000000
--- n=15  2     4.52   375ns   380.5ns  208ns  21.42us  202.67ns  1000000{}
+-- n=15  2     4.52   375ns   380.5ns  208ns  21.42us  202.67ns  1000000
 local time_stats = luamark.timeit(function()
    factorial(10)
 end, { rounds = 10 })
 
--- Results can be accessed as a table or as a string via the `tostring` metamethod.
+-- Results can be accessed as a table or as a string via the `__tostring` metamethod.
 print(type(time_stats))
 -- table
 print(time_stats)
