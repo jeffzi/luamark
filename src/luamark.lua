@@ -211,7 +211,7 @@ function luamark.summarize(benchmark_results)
       return tonumber(a.rank) < tonumber(b.rank)
    end)
 
-   local headers = { "name", "rank", "ratio", "mean", "median", "min", "max", "stddev", "rounds" }
+   local headers = { "name", "rank", "ratio", "median", "mean", "min", "max", "stddev", "rounds" }
 
    -- Calculate column widths
    local widths = {}
@@ -508,7 +508,7 @@ local function benchmark(funcs, ...)
       results[name] = single_benchmark(func, ...)
    end
 
-   local stats = luamark.rank(results, "mean")
+   local stats = luamark.rank(results, "median")
    setmetatable(stats, {
       __tostring = function(self)
          return luamark.summarize(self)
