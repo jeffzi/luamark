@@ -14,6 +14,7 @@ LuaMark is a lightweight, portable microbenchmarking library designed for the Lu
 - **Statistical Analysis**: Gain comprehensive statistical insights, including minimum, maximum, mean, and standard deviation for your benchmarks.
 - **Minimal configuration**: LuaMark is designed to be turnkey and user-friendly allowing you to focus on optimizing your Lua code without the hassle of complex setup processes.
 - **Support for Multiple Clock Modules**: LuaMark supports a range of clock modules like [Chronos](https://github.com/chronos-timetravel/chronos), [LuaPosix](https://github.com/luaposix/luaposix), and [LuaSocket](https://github.com/diegonehab/luasocket), offering flexibility and enhanced precision in time measurement.
+- **Support for Lua 5.1, 5.2, 5.3, 5.4, LuaJIT 2.1 and Luau**.
 
 ## Installation
 
@@ -22,6 +23,8 @@ To install LuaMark using [LuaRocks](https://luarocks.org/), run the following co
 ```shell
 luarocks install luamark
 ```
+
+Another option is to copy the [luamark.lua](src/luamark.lua) to your project.
 
 ## Usage
 
@@ -79,6 +82,10 @@ print(mem_stats)
 -- 2.06kB ± 0B per round (533081 rounds)
 ```
 
+## API Documentation
+
+For more detailed information about LuaMark's API, please refer to the [API Documentation](docs/api.md).
+
 ## Understanding Iterations and Rounds in Time Measurement
 
 In LuaMark, the `timeit` function employs a combination of _iterations_ and _rounds_ to accurately measure execution times, addressing the granularity issue of system clocks. An _iteration_ refers to the number of times the code is executed in a single round, while a _round_ is one of the multiple individual trials in which these iterations occur. System clocks often have limited precision, which can make it challenging to measure very short durations accurately. By executing the code multiple times (iterations) within a round and repeating this across several rounds, LuaMark can average the results, effectively reducing the impact of any single measurement's inaccuracies due to clock granularity.
@@ -98,10 +105,6 @@ LuaMark optimizes timing accuracy by supporting various Lua modules for high-pre
 4. **Standard os.clock**: This is the default option used if none of the above modules are detected. However, installing an external module like Chronos or LuaPosix is recommended for higher resolution clocks, as `os.clock` offers limited precision.
 
 Users are encouraged to install either Chronos or LuaPosix (considering platform compatibility) to achieve the most accurate timing benchmarks, especially in critical high-resolution timing scenarios.
-
-## API Documentation
-
-For more detailed information about LuaMark's API, please refer to the [API Documentation](docs/api.md).
 
 ## Contributing
 

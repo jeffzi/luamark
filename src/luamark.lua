@@ -31,7 +31,8 @@ end
 ---@return integer|nil
 local function set_clock(modname)
    if modname == "os" then
-      clock, clock_precision = os.clock, 3
+      clock = os.clock
+      clock_precision = _VERSION == "Luau" and 5 or 3
    end
 
    local has_module, lib = pcall(require, modname)
@@ -456,7 +457,7 @@ local function single_benchmark(
    local duration, start
 
    if disable_gc then
-      collectgarbage("stop")
+      pcall(collectgarbage, "stop")
    end
 
    repeat
@@ -477,7 +478,7 @@ local function single_benchmark(
       or (rounds and completed_rounds == rounds)
       or (completed_rounds == MAX_ROUNDS)
 
-   collectgarbage("restart")
+   pcall(collectgarbage, "restart")
 
    local results = calculate_stats(samples)
    results.rounds = completed_rounds
