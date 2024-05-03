@@ -31,12 +31,12 @@ end
 ---@return integer|nil
 local function set_clock(modname)
    if modname == "os" then
-      return os.clock, 3
+      clock, clock_precision = os.clock, 3
    end
 
    local has_module, lib = pcall(require, modname)
    if not has_module then
-      return nil, nil
+      return
    end
 
    if modname == "chronos" then
