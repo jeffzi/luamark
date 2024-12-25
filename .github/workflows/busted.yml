@@ -29,6 +29,7 @@ jobs:
           luarocks install chronos
           luarocks install luaposix
           luarocks install luasocket
+          luarocks install https://raw.githubusercontent.com/siffiejoe/lua-allocspy/refs/heads/master/allocspy-scm-0.rockspec
 
       - name: Run tests
         run: busted
