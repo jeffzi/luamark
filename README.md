@@ -63,6 +63,10 @@ local time_stats = luamark.timeit({
    end,
 })
 
+-- Results can be accessed as a table
+print(type(time_stats))  -- "table"
+
+-- Or displayed via string conversion
 print(time_stats)
 -- Output:
 -- Name  Rank  Ratio  Median   Mean     Min     Max     Stddev   Rounds
@@ -96,6 +100,10 @@ local mem_stats = luamark.memit(function()
    end
 end)
 
+-- Results can be accessed as a table
+print(type(mem_stats))  -- "table"
+
+-- Or displayed via string conversion
 print(mem_stats)
 -- Output: 2.06kB ± 0B per round (533081 rounds)
 ```
