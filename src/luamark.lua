@@ -32,14 +32,14 @@ local function get_min_clocktime()
    return (10 ^ -clock_precision)
 end
 
-local CLOCK_PRIORITIES = { "chronos", "posix", "socket", "os" }
+local CLOCK_PRIORITIES = { "chronos", "posix.time", "socket" }
 --Dispatch loaded module to a function that returns the clock function and clock precision.
 local CLOCKS = {
    chronos = function(chronos)
       return chronos.nanotime, 9
    end,
-   posix = function(posix)
-      local clock_gettime, CLOCK_MONOTONIC = posix.time.clock_gettime, posix.time.CLOCK_MONOTONIC
+   ["posix.time"] = function(posix_time)
+      local clock_gettime, CLOCK_MONOTONIC = posix_time.clock_gettime, posix_time.CLOCK_MONOTONIC
       if not clock_gettime then
          error("posix.time.clock_gettime is not supported on this OS.")
       end
@@ -51,9 +51,6 @@ local CLOCKS = {
    end,
    socket = function(socket)
       return socket.gettime, 4
-   end,
-   os = function(os)
-      return os.clock, _VERSION == "Luau" and 5 or 3
    end,
 }
 
@@ -67,6 +64,11 @@ for _, name in ipairs(CLOCK_PRIORITIES) do
       luamark.clock_name = name
       break
    end
+end
+
+if not luamark.clock_name then
+   clock, clock_precision = os.clock, _VERSION == "Luau" and 5 or 3
+   luamark.clock_name = "os.clock"
 end
 
 ---@alias NoArgFun fun(): any
