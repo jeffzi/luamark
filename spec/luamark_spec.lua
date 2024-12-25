@@ -15,12 +15,12 @@ local function try_require(clock_module)
 end
 
 local chronos = try_require("chronos")
-local posix = try_require("posix")
+local posix_time = try_require("posix.time")
 local socket = try_require("socket")
 
 local CLOCKS = { "chronos" }
-if posix.time.clock_gettime then
-   table.insert(CLOCKS, "posix")
+if posix_time.clock_gettime then
+   table.insert(CLOCKS, "posix.time")
 end
 
 ---@param include {string:boolean}
