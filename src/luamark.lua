@@ -363,7 +363,7 @@ end
 -- Benchmark
 -- -----------------------------------------------s-----------------------------
 
----@alias Measure fun(fn: NoArgFun, iterations: integer, setup?: function, teardown?: function): number
+---@alias Measure fun(fn: NoArgFun, iterations: integer, setup?: function, teardown?: function): number, number
 
 ---@param measure_once MeasureOnce
 ---@param precision integer
@@ -371,7 +371,7 @@ end
 local function build_measure(measure_once, precision)
    return function(fn, iterations, setup, teardown)
       local total = 0
-      for _ = 1, (iterations or 1) do
+      for _ = 1, iterations do
          if setup then
             setup()
          end
@@ -382,28 +382,27 @@ local function build_measure(measure_once, precision)
             teardown()
          end
       end
-      return math_round(total, precision)
+      return total, math_round(total / iterations, precision)
    end
 end
 
 local measure_time = build_measure(measure_time_once, clock_precision)
 local measure_memory = build_measure(measure_memory_once, 4)
 
---- Determine the round parameters
 ---@param fn NoArgFun The function to benchmark.
 ---@return number # Duration of a round.
 local function calibrate_iterations(fn, setup, teardown)
    local min_time = get_min_clocktime() * CALIBRATION_PRECISION
 
-   local duration
+   local round_duration
    local iterations = 1
    while true do
-      duration = measure_time(fn, iterations, setup, teardown)
-      if duration >= min_time then
+      round_duration = measure_time(fn, iterations, setup, teardown)
+      if round_duration >= min_time then
          break
       end
-      if duration >= clock_precision then
-         iterations = math.ceil(min_time * iterations / duration)
+      if round_duration >= clock_precision then
+         iterations = math.ceil(min_time * iterations / round_duration)
          if iterations == 1 then
             -- Nothing to calibrate anymore
             break
@@ -465,7 +464,8 @@ local function single_benchmark(fn, measure, disable_gc, unit, rounds, max_time,
       completed_rounds = completed_rounds + 1
       start = clock()
 
-      samples[completed_rounds] = measure(fn, iterations, setup, teardown)
+      local _, iteration_measure = measure(fn, iterations, setup, teardown)
+      samples[completed_rounds] = iteration_measure
 
       duration = clock() - start
       total_duration = total_duration + duration
