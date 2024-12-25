@@ -7,19 +7,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        luaVersion: ["5.4", "5.3", "5.2", "5.1", "luajit"]
-        # leafo/gh-actions-luarocks does not support windows
-        # macos has weird sleep issues on github action's runner but fine on macbook
+        luaVersion: ["5.4", "5.3", "5.2", "5.1", "luajit-openresty"]
         os: [ubuntu-latest]
 
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Setup Windows environment
-        if: matrix.os == 'windows-latest'
-        uses: ilammy/msvc-dev-cmd@v1
 
       - name: Setup Lua
         uses: leafo/gh-actions-lua@v10
