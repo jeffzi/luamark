@@ -1,33 +1,27 @@
 ---@diagnostic disable: undefined-field, unused-local
 
-local function try_require(modname)
-   has_module, lib = pcall(require, modname)
-   assert(has_module, string.format("Dependency '%s' is required for testing.", modname))
-   return lib
-end
-
-local chronos = try_require("chronos")
-local posix = try_require("posix")
-local socket = try_require("socket")
-
--- ----------------------------------------------------------------------------
--- Test parameters
--- ----------------------------------------------------------------------------
-
-local SLEEP_TIME = 0.001
--- socket.sleep doesn't sleep the exact time
-local TIME_TOL = SLEEP_TIME / 3
-local MEMORY_TOL = 0.0005
-local LIBS = { "socket", "chronos" }
-local MODULES = { "socket", "chronos" }
-
-if posix.time.clock_gettime then
-   table.insert(MODULES, "posix.time")
-end
-
 -- ----------------------------------------------------------------------------
 -- Helpers
 -- ----------------------------------------------------------------------------
+
+local lua_require = require
+
+local function try_require(clock_module)
+   module_installed, lib = pcall(require, clock_module)
+   assert(module_installed, string.format("Dependency '%s' is required for testing.", clock_module))
+   return lib
+end
+
+local function build_filtered_require(exclude)
+   return function(module_name)
+      package.loaded[exclude] = nil -- disable cache
+      if module_name == exclude then
+         error(string.format("module '%s' not found", module_name))
+      else
+         return lua_require(module_name)
+      end
+   end
+end
 
 local noop = function() end
 
@@ -39,15 +33,37 @@ local function assert_stats_not_nil(stats)
 end
 
 -- ----------------------------------------------------------------------------
+-- Test parameters
+-- ----------------------------------------------------------------------------
+
+local SLEEP_TIME = 0.001
+-- socket.sleep doesn't sleep the exact time
+local TIME_TOL = SLEEP_TIME / 3
+local MEMORY_TOL = 0.0005
+
+local chronos = try_require("chronos")
+local posix = try_require("posix")
+local socket = try_require("socket")
+
+local MODULES = { "socket", "chronos" }
+if posix.time.clock_gettime then
+   table.insert(MODULES, "posix")
+end
+
+-- ----------------------------------------------------------------------------
 -- Tests per clock module
 -- ----------------------------------------------------------------------------
 
-for _, modname in ipairs(MODULES) do
-   describe("clock=" .. modname, function()
+for _, clock_module in ipairs(MODULES) do
+   describe("clock = " .. clock_module .. " ->", function()
+      local luamark
+
       setup(function()
          _G._TEST = true
-         luamark = require("../src/luamark")
-         luamark.set_clock(modname)
+         -- prevent from loading optional dependencies
+         _G.require = build_filtered_require(clock_module)
+         package.loaded["luamark"] = nil
+         luamark = require("src.luamark")
       end)
 
       teardown(function()
@@ -230,7 +246,7 @@ end
 
 describe("error", function()
    setup(function()
-      luamark = require("../src/luamark")
+      luamark = require("src.luamark")
    end)
 
    describe(" ", function()
@@ -257,7 +273,7 @@ describe("error", function()
 
          test("function " .. bench_suffix, function()
             assert.has.errors(function()
-               ---@diagnostic disable-next-line: param-type-mismatch
+               ---@diagnostic disable-next-line: param-type-mismatch, missing-parameter
                benchmark(nil)
             end)
          end)
@@ -270,8 +286,10 @@ end)
 -- ----------------------------------------------------------------------------
 
 describe("rank", function()
+   local luamark
+
    setup(function()
-      luamark = require("../src/luamark")
+      luamark = require("src.luamark")
    end)
 
    test("unique values", function()
@@ -331,9 +349,11 @@ describe("rank", function()
 end)
 
 describe("format_stat", function()
+   local luamark
+
    setup(function()
       _G._TEST = true
-      luamark = require("../src/luamark")
+      luamark = require("src.luamark")
    end)
 
    test("converts kilobytes to terabytes", function()
@@ -351,5 +371,30 @@ describe("format_stat", function()
 
    test("round < 1B", function()
       assert.are.equal("0B", luamark.format_stat(0.25 / 1024, "kb"))
+   end)
+end)
+
+-- ----------------------------------------------------------------------------
+-- Test Config
+-- ----------------------------------------------------------------------------
+
+describe("config", function()
+   local luamark
+
+   setup(function()
+      _G._TEST = true
+      luamark = require("src.luamark")
+   end)
+
+   test("accepts valid config option", function()
+      for _, opt in ipairs({ "max_iterations", "min_rounds", "max_rounds", "warmups" }) do
+         luamark[opt] = 1
+      end
+   end)
+
+   test("rejects invalid config option", function()
+      assert.has.errors(function()
+         luamark.foo = 1
+      end, "Invalid config option: foo")
    end)
 end)
