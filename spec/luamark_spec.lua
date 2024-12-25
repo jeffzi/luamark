@@ -1,4 +1,6 @@
 ---@diagnostic disable: undefined-field, unused-local
+---@
+local SRC_PATH = "src.luamark"
 
 -- ----------------------------------------------------------------------------
 -- Helpers
@@ -7,19 +9,50 @@
 local lua_require = require
 
 local function try_require(clock_module)
-   module_installed, lib = pcall(require, clock_module)
+   module_installed, lib = pcall(lua_require, clock_module)
    assert(module_installed, string.format("Dependency '%s' is required for testing.", clock_module))
    return lib
 end
 
-local function build_filtered_require(exclude)
+local chronos = try_require("chronos")
+local posix = try_require("posix")
+local socket = try_require("socket")
+
+local CLOCKS = { "chronos" }
+if posix.time.clock_gettime then
+   table.insert(CLOCKS, "posix")
+end
+
+---@param include {string:boolean}
+local function build_filtered_require(include)
    return function(module_name)
-      package.loaded[exclude] = nil -- disable cache
-      if module_name == exclude then
-         error(string.format("module '%s' not found", module_name))
-      else
-         return lua_require(module_name)
+      for name, should_include in pairs(include) do
+         if not should_include and module_name == name then
+            error(string.format("module '%s' not found", module_name))
+         end
       end
+      return lua_require(module_name)
+   end
+end
+
+local load_luamark
+do
+   local INCLUDE_FILTER = {}
+   for _, clock_name in ipairs(CLOCKS) do
+      INCLUDE_FILTER[clock_name] = false
+   end
+   load_luamark = function(clock_module)
+      -- unload modules
+      package.loaded[SRC_PATH] = nil
+      for _, clock_name in ipairs(CLOCKS) do
+         package.loaded[clock_name] = nil
+      end
+
+      INCLUDE_FILTER[clock_module] = true
+      _G.require = build_filtered_require(INCLUDE_FILTER)
+      luamark = require(SRC_PATH)
+      INCLUDE_FILTER[clock_module] = false
+      return luamark
    end
 end
 
@@ -41,29 +74,17 @@ local SLEEP_TIME = 0.001
 local TIME_TOL = SLEEP_TIME / 3
 local MEMORY_TOL = 0.0005
 
-local chronos = try_require("chronos")
-local posix = try_require("posix")
-local socket = try_require("socket")
-
-local MODULES = { "socket", "chronos" }
-if posix.time.clock_gettime then
-   table.insert(MODULES, "posix")
-end
-
 -- ----------------------------------------------------------------------------
 -- Tests per clock module
 -- ----------------------------------------------------------------------------
 
-for _, clock_module in ipairs(MODULES) do
-   describe("clock = " .. clock_module .. " ->", function()
+for _, clock_name in ipairs(CLOCKS) do
+   describe("clock = " .. clock_name .. " ->", function()
       local luamark
 
       setup(function()
          _G._TEST = true
-         -- prevent from loading optional dependencies
-         _G.require = build_filtered_require(clock_module)
-         package.loaded["luamark"] = nil
-         luamark = require("src.luamark")
+         luamark = load_luamark(clock_name)
       end)
 
       teardown(function()
@@ -72,6 +93,9 @@ for _, clock_module in ipairs(MODULES) do
       -- ----------------------------------------------------------------------------
       -- Base tests
       -- ----------------------------------------------------------------------------
+      describe("use clock", function()
+         assert.are_equal(clock_name, luamark.clock_name)
+      end)
 
       describe("base", function()
          for name, benchmark in pairs({ timeit = luamark.timeit, memit = luamark.memit }) do
@@ -132,7 +156,7 @@ for _, clock_module in ipairs(MODULES) do
                local expected_max_time = 0.5
                local actual_time = luamark.measure_time(function()
                   benchmark(sleep_250ms, { rounds = 1e9, max_time = expected_max_time })
-               end)
+               end, 1)
                -- Tolerance for calculating stats, garbage collection, etc.
                assert.is_near(expected_max_time, actual_time, 0.3)
             end)
@@ -225,7 +249,7 @@ for _, clock_module in ipairs(MODULES) do
             local all_stats = luamark.memit(funcs, { rounds = 100 })
 
             for func_name, stats in pairs(all_stats) do
-               local single_call_memory = luamark.measure_memory(funcs[func_name])
+               local single_call_memory = luamark.measure_memory(funcs[func_name], 1)
 
                test("mean: " .. func_name, function()
                   assert.near(single_call_memory, stats.mean, MEMORY_TOL)
@@ -246,7 +270,7 @@ end
 
 describe("error", function()
    setup(function()
-      luamark = require("src.luamark")
+      luamark = require(SRC_PATH)
    end)
 
    describe(" ", function()
@@ -289,7 +313,7 @@ describe("rank", function()
    local luamark
 
    setup(function()
-      luamark = require("src.luamark")
+      luamark = require(SRC_PATH)
    end)
 
    test("unique values", function()
@@ -353,7 +377,7 @@ describe("format_stat", function()
 
    setup(function()
       _G._TEST = true
-      luamark = require("src.luamark")
+      luamark = require(SRC_PATH)
    end)
 
    test("converts kilobytes to terabytes", function()
@@ -383,7 +407,7 @@ describe("config", function()
 
    setup(function()
       _G._TEST = true
-      luamark = require("src.luamark")
+      luamark = require(SRC_PATH)
    end)
 
    test("accepts valid config option", function()
