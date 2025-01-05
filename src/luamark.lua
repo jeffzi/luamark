@@ -6,6 +6,8 @@ local luamark = {
    _VERSION = "0.8.0",
 }
 
+local tconcat, tinsert, tsort = table.concat, table.insert, table.sort
+
 -- ----------------------------------------------------------------------------
 -- Config
 -- ----------------------------------------------------------------------------
@@ -122,11 +124,86 @@ local function math_round(num, precision)
    return math.max(rounded, 10 ^ -precision)
 end
 
----@alias default_unit `s` | `kb`
+-- ----------------------------------------------------------------------------
+-- Statistics
+-- ----------------------------------------------------------------------------
+
+--- Calculates measurements from timeit or memit samples..
+---@param samples table The table of raw measurements from timeit or memit.
+---@return table # A table of statistical measurements.
+local function calculate_stats(samples)
+   local stats = {}
+
+   stats.count = #samples
+
+   tsort(samples)
+   -- Calculate median
+   if math.fmod(#samples, 2) == 0 then
+      -- If even or odd #samples -> mean of the 2 elements at the center
+      stats.median = (samples[#samples / 2] + samples[(#samples / 2) + 1]) / 2
+   else
+      -- middle element
+      stats.median = samples[math.ceil(#samples / 2)]
+   end
+
+   stats.total = 0
+   local min, max = MAX_INT, 0
+   for i = 1, stats.count do
+      local sample = samples[i]
+      stats.total = stats.total + sample
+      min = math.min(sample, min)
+      max = math.max(sample, max)
+   end
+
+   stats.min = min
+   stats.max = max
+   stats.mean = stats.total / stats.count
+
+   local sum_of_squares = 0
+   for _, sample in ipairs(samples) do
+      sum_of_squares = sum_of_squares + (sample - stats.mean) ^ 2
+   end
+   stats.stddev = math.sqrt(sum_of_squares / (stats.count - 1))
+
+   return stats
+end
+
+--- Rank benchmark results (`timeit` or `memit`) by specified `key` and adds a 'rank' and 'ratio' key to each.
+--- The smallest attribute value gets the rank 1 and ratio 1.0, other ratios are relative to it.
+---@param benchmark_results {[string]:{[string]: any}} The benchmark results to rank, indexed by name.
+---@param key string The stats to rank by.
+---@return {[string]:{[string]: any}}
+local function rank(benchmark_results, key)
+   assert(benchmark_results, "'benchmark_results' is nil or empty.")
+
+   local ranks = {}
+   for benchmark_name, stats in pairs(benchmark_results) do
+      tinsert(ranks, { name = benchmark_name, value = stats[key] })
+   end
+
+   tsort(ranks, function(a, b)
+      return a.value < b.value
+   end)
+
+   local rnk = 1
+   local prev_value = nil
+   local min = ranks[1].value
+   for i, entry in ipairs(ranks) do
+      if prev_value ~= entry.value then
+         rnk = i
+         prev_value = entry.value
+      end
+      benchmark_results[entry.name].rank = rnk
+      benchmark_results[entry.name].ratio = rnk == 1 and 1 or entry.value / min
+   end
+   return benchmark_results
+end
 
 -- ----------------------------------------------------------------------------
 -- Pretty Printing
 -- ----------------------------------------------------------------------------
+
+---@alias default_unit `s` | `kb`
 
 local TIME_UNITS = {
    { "m", 60 * 1e9 },
@@ -227,136 +304,78 @@ local function center(content, expected_width)
    return left_padding .. content .. right_padding
 end
 
+---@param t string[]
+---@param format? "plain"|"markdown"
+local function concat_line(t, format)
+   if format == "plain" then
+      return tconcat(t, "  ")
+   end
+   return "| " .. tconcat(t, " | ") .. " |"
+end
+
+local SUMMARIZE_HEADERS = {
+   "name",
+   "rank",
+   "ratio",
+   "median",
+   "mean",
+   "min",
+   "max",
+   "stddev",
+   "rounds",
+}
+
 ---Return a string summarizing the results of multiple benchmarks.
 ---@param benchmark_results {[string]:{[string]: any}} The benchmark results to summarize, indexed by name.
+---@param format? "plain"|"markdown" The output format
 ---@return string
-function luamark.summarize(benchmark_results)
-   local pretty_rows = {}
+function luamark.summarize(benchmark_results, format)
+   format = format or "plain"
+   assert(format == "plain" or format == "markdown", "format must be 'plain' or 'markdown'")
+
+   -- Format rows
+   benchmark_results = rank(benchmark_results, "median")
+   local rows = {}
    for benchmark_name, stats in pairs(benchmark_results) do
       local formatted = format_row(stats)
       formatted["name"] = benchmark_name
-      table.insert(pretty_rows, formatted)
+      tinsert(rows, formatted)
    end
-   table.sort(pretty_rows, function(a, b)
+   tsort(rows, function(a, b)
       return tonumber(a.rank) < tonumber(b.rank)
    end)
 
-   local headers = { "name", "rank", "ratio", "median", "mean", "min", "max", "stddev", "rounds" }
-
    -- Calculate column widths
    local widths = {}
-   for i, header in ipairs(headers) do
-      widths[i] = string.len(header)
-      for _, row in pairs(pretty_rows) do
-         local cell = tostring(row[header] or "")
-         widths[i] = math.max(widths[i], string.len(cell))
+   for i, header in ipairs(SUMMARIZE_HEADERS) do
+      widths[i] = #header
+      for _, row in ipairs(rows) do
+         widths[i] = math.max(widths[i], #tostring(row[header] or ""))
       end
    end
 
    local lines = {}
 
    -- Header row
-   local cells = {}
-   for i, header in ipairs(headers) do
+   local header_row, header_underline = {}, {}
+   for i, header in ipairs(SUMMARIZE_HEADERS) do
       header = header:gsub("^%l", string.upper)
-      table.insert(cells, center(header, widths[i]) .. "  ")
+      tinsert(header_row, center(header, widths[i]))
+      tinsert(header_underline, string.rep("-", widths[i]))
    end
-   table.insert(lines, table.concat(cells))
-
-   -- Header separator
-   cells = {}
-   for i, _ in ipairs(headers) do
-      table.insert(cells, string.rep("-", widths[i]) .. "  ")
-   end
-   table.insert(lines, table.concat(cells))
+   tinsert(lines, concat_line(header_row, format))
+   tinsert(lines, concat_line(header_underline, format))
 
    -- Data rows
-   for _, row in pairs(pretty_rows) do
-      cells = {}
-      for i, header in ipairs(headers) do
-         if row[header] then
-            table.insert(cells, pad(row[header], widths[i]))
-         end
+   for _, row in ipairs(rows) do
+      local cells = {}
+      for i, header in ipairs(SUMMARIZE_HEADERS) do
+         cells[#cells + 1] = pad(row[header], widths[i])
       end
-      table.insert(lines, table.concat(cells, "  "))
+      lines[#lines + 1] = concat_line(cells, format)
    end
 
-   return table.concat(lines, "\n")
-end
-
--- ----------------------------------------------------------------------------
--- Statistics
--- ----------------------------------------------------------------------------
-
---- Calculates measurements from timeit or memit samples..
----@param samples table The table of raw measurements from timeit or memit.
----@return table # A table of statistical measurements.
-local function calculate_stats(samples)
-   local stats = {}
-
-   stats.count = #samples
-
-   table.sort(samples)
-   -- Calculate median
-   if math.fmod(#samples, 2) == 0 then
-      -- If even or odd #samples -> mean of the 2 elements at the center
-      stats.median = (samples[#samples / 2] + samples[(#samples / 2) + 1]) / 2
-   else
-      -- middle element
-      stats.median = samples[math.ceil(#samples / 2)]
-   end
-
-   stats.total = 0
-   local min, max = MAX_INT, 0
-   for i = 1, stats.count do
-      local sample = samples[i]
-      stats.total = stats.total + sample
-      min = math.min(sample, min)
-      max = math.max(sample, max)
-   end
-
-   stats.min = min
-   stats.max = max
-   stats.mean = stats.total / stats.count
-
-   local sum_of_squares = 0
-   for _, sample in ipairs(samples) do
-      sum_of_squares = sum_of_squares + (sample - stats.mean) ^ 2
-   end
-   stats.stddev = math.sqrt(sum_of_squares / (stats.count - 1))
-
-   return stats
-end
-
---- Rank benchmark results (`timeit` or `memit`) by specified `key` and adds a 'rank' and 'ratio' key to each.
---- The smallest attribute value gets the rank 1 and ratio 1.0, other ratios are relative to it.
----@param benchmark_results {[string]:{[string]: any}} The benchmark results to rank, indexed by name.
----@param key string The stats to rank by.
----@return {[string]:{[string]: any}}
-local function rank(benchmark_results, key)
-   assert(benchmark_results, "'benchmark_results' is nil or empty.")
-
-   local ranks = {}
-   for benchmark_name, stats in pairs(benchmark_results) do
-      table.insert(ranks, { name = benchmark_name, value = stats[key] })
-   end
-
-   table.sort(ranks, function(a, b)
-      return a.value < b.value
-   end)
-
-   local rnk = 1
-   local prev_value = nil
-   local min = ranks[1].value
-   for i, entry in ipairs(ranks) do
-      if prev_value ~= entry.value then
-         rnk = i
-         prev_value = entry.value
-      end
-      benchmark_results[entry.name].rank = rnk
-      benchmark_results[entry.name].ratio = rnk == 1 and 1 or entry.value / min
-   end
-   return benchmark_results
+   return tconcat(lines, "\n")
 end
 
 -- ----------------------------------------------------------------------------
