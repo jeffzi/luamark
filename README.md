@@ -73,6 +73,9 @@ print(time_stats)
 -- ----  ----  -----  ------  -------  -----  -------  --------  -------
 -- n=1   1     1.00   83ns    68.17ns  1ns    15.75us  83.98ns   1000000
 -- n=15  2     4.52   375ns   380.5ns  208ns  21.42us  202.67ns  1000000
+
+-- Get the summary as a markdown table
+local md = luamark.summarize(time_stats, "markdown)
 ```
 
 ### Single Function Timing
