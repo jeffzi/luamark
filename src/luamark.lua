@@ -1,9 +1,9 @@
 -- luamark - A lightweight, portable micro-benchmarking library.
--- Copyright (c) 2024 Jean-Francois Zinque. MIT License.
+-- Copyright (c) 2025 Jean-Francois Zinque. MIT License.
 
 ---@class luamark
 local luamark = {
-   _VERSION = "0.8.0",
+   _VERSION = "0.9.0",
 }
 
 local tconcat, tinsert, tsort = table.concat, table.insert, table.sort
@@ -73,7 +73,7 @@ if not luamark.clock_name then
    luamark.clock_name = "os.clock"
 end
 
----@alias NoArgFun fun(): any
+---@alias NoArgFun fun()
 ---@alias MeasureOnce fun(fn: NoArgFun):number
 
 ---@type MeasureOnce
@@ -515,7 +515,7 @@ local function single_benchmark(fn, measure, disable_gc, unit, rounds, max_time,
    return results
 end
 
----@param funcs (fun(): any)|({[string]: fun(): any}) A single zero-argument function or a table of zero-argument functions indexed by name.
+---@param funcs fun()|({[string]: fun()}) A single zero-argument function or a table of zero-argument functions indexed by name.
 ---@param ... any arguments that will be forwarded to `single_benchmark`.
 ---@return {[string]:any}|{[string]:{[string]: any}} # A table of statistical measurements for the function(s) benchmarked, indexed by the function name if multiple functions were given.
 local function benchmark(funcs, ...)
@@ -537,6 +537,12 @@ local function benchmark(funcs, ...)
    return stats
 end
 
+---@class BenchmarkOptions
+---@field rounds? integer The number of times to run the benchmark. Defaults to a predetermined number if not provided.
+---@field max_time? integer Maximum run time in seconds. It may be exceeded if test function is very slow.
+---@field setup? fun()  Function executed before the measured function.
+---@field teardown? fun() Function executed after the measured function.
+
 local VALID_OPTS = {
    rounds = "number",
    max_time = "number",
@@ -544,6 +550,7 @@ local VALID_OPTS = {
    teardown = "function",
 }
 
+---@param opts BenchmarkOptions
 local function check_options(opts)
    for k, v in pairs(opts) do
       local opt_type = VALID_OPTS[k]
@@ -557,12 +564,8 @@ local function check_options(opts)
 end
 
 --- Benchmarks a function for execution time. The time is represented in seconds.
----@param fn (fun(): any)|({[string]: fun(): any}) A single zero-argument function or a table of zero-argument functions indexed by name.
----@param opts table Options table which may include rounds, max_time, setup, teardown.
----   - rounds: number The number of times to run the benchmark. Defaults to a predetermined number if not provided.
----   - max_time: number Maximum run time. It may be exceeded if test function is very slow.
----   - setup: function Function executed before the measured function.
----   - teardown: function Function executed after the measured function.
+---@param fn fun()|({[string]: fun()}) A single zero-argument function or a table of zero-argument functions indexed by name.
+---@param opts? BenchmarkOptions Options table for configuring the benchmark.
 ---@return {[string]:any}|{[string]:{[string]: any}} # A table of statistical measurements for the function(s) benchmarked, indexed by the function name if multiple functions were given.
 function luamark.timeit(fn, opts)
    opts = opts or {}
@@ -580,12 +583,8 @@ function luamark.timeit(fn, opts)
 end
 
 --- Benchmarks a function for memory usage. The memory usage is represented in kilobytes.
----@param fn (fun(): any)|({[string]: fun(): any}) A single zero-argument function or a table of zero-argument functions indexed by name.
----@param opts table Options table which may include rounds, max_time, setup, teardown.
----   - rounds: number The number of times to run the benchmark. Defaults to a predetermined number if not provided.
----   - max_time: number Maximum run time. It may be exceeded if test function is very slow.
----   - setup: function Function executed before the measured function.
----   - teardown: function Function executed after the measured function.
+---@param fn fun()|({[string]: fun()}) A single zero-argument function or a table of zero-argument functions indexed by name.
+---@param opts? BenchmarkOptions Options table for configuring the benchmark.
 ---@return {[string]:any}|{[string]:{[string]: any}} # A table of statistical measurements for the function(s) benchmarked, indexed by the function name if multiple functions were given.
 function luamark.memit(fn, opts)
    opts = opts or {}
