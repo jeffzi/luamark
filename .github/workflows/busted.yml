@@ -21,7 +21,7 @@ jobs:
           luaVersion: ${{ matrix.luaVersion }}
 
       - name: Setup LuaRocks
-        uses: leafo/gh-actions-luarocks@v4
+        uses: leafo/gh-actions-luarocks@v5
 
       - name: Setup dependencies
         run: |
