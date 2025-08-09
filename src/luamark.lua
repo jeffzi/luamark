@@ -14,7 +14,6 @@ local tconcat, tinsert, tsort = table.concat, table.insert, table.sort
 
 local MIN_TIME = 1
 local CALIBRATION_PRECISION = 5
-local MAX_INT = 2 ^ 1023
 
 local config = {
    max_iterations = 1e6,
@@ -137,17 +136,14 @@ local function calculate_stats(samples)
    stats.count = #samples
 
    tsort(samples)
-   -- Calculate median
    if math.fmod(#samples, 2) == 0 then
-      -- If even or odd #samples -> mean of the 2 elements at the center
       stats.median = (samples[#samples / 2] + samples[(#samples / 2) + 1]) / 2
    else
-      -- middle element
       stats.median = samples[math.ceil(#samples / 2)]
    end
 
    stats.total = 0
-   local min, max = MAX_INT, 0
+   local min, max = math.huge, 0
    for i = 1, stats.count do
       local sample = samples[i]
       stats.total = stats.total + sample
@@ -440,7 +436,8 @@ end
 ---@return integer max_time
 local function calibrate_stop(round_duration)
    local max_time = math.max(config.min_rounds * round_duration, MIN_TIME)
-   return math.min(max_time / round_duration, config.max_rounds), max_time
+   local rounds = math.ceil(math.min(max_time / round_duration, config.max_rounds))
+   return rounds, max_time
 end
 
 --- Runs a benchmark on a function using a specified measurement method.
@@ -618,7 +615,6 @@ return setmetatable(luamark, {
       if config[k] == nil then
          error("Invalid config option: " .. k)
       end
-
       config[k] = v
    end,
 })
