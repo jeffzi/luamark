@@ -408,26 +408,26 @@ local measure_memory = build_measure(measure_memory_once, 4)
 ---@return number # Duration of a round.
 local function calibrate_iterations(fn, setup, teardown)
    local min_time = get_min_clocktime() * CALIBRATION_PRECISION
-
-   local round_duration
    local iterations = 1
+
    while true do
-      round_duration = measure_time(fn, iterations, setup, teardown)
-      if round_duration >= min_time then
+      local round_total = measure_time(fn, iterations, setup, teardown)
+      if round_total >= min_time then
          break
       end
-      if round_duration >= clock_precision then
-         iterations = math.ceil(min_time * iterations / round_duration)
-         if iterations == 1 then
-            -- Nothing to calibrate anymore
-            break
-         end
-      else
-         iterations = iterations * 10
+      local scale = min_time / (round_total > 0) and round_total or get_min_clocktime()
+      iterations = math.ceil(iterations * scale)
+      if iterations <= 1 then
+         iterations = 1
+         break
+      end
+      if iterations >= config.max_iterations then
+         iterations = config.max_iterations
+         break
       end
    end
 
-   return math.min(iterations, config.max_iterations)
+   return iterations
 end
 
 ---Return pratical rounds and max time
