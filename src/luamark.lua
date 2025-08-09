@@ -456,15 +456,14 @@ end
 ---@param teardown? function Function executed after computing each benchmark value.
 ---@return table # A table containing the results of the benchmark .
 local function single_benchmark(fn, measure, disable_gc, unit, rounds, max_time, setup, teardown)
-   assert(
-      type(fn) == "function" or type("function") == "table",
-      "'fn' must be a function or a table of functions indexed by name."
-   )
+   assert(type(fn) == "function", "'fn' must be a function.")
    assert(not rounds or rounds > 0, "'rounds' must be > 0.")
    assert(not max_time or max_time > 0, "'max_time' must be > 0.")
    assert(not setup or type(setup) == "function")
    assert(not teardown or type(teardown) == "function")
-   disable_gc = disable_gc or true
+   if disable_gc == nil then
+      disable_gc = true
+   end
 
    local iterations = calibrate_iterations(fn, setup, teardown)
    for _ = 1, config.warmups do
