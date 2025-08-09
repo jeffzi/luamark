@@ -155,11 +155,16 @@ local function calculate_stats(samples)
    stats.max = max
    stats.mean = stats.total / stats.count
 
-   local sum_of_squares = 0
-   for _, sample in ipairs(samples) do
-      sum_of_squares = sum_of_squares + (sample - stats.mean) ^ 2
+   local variance = 0
+   if stats.count > 1 then
+      local sum_of_squares = 0
+      for i = 1, stats.count do
+         local d = samples[i] - stats.mean
+         sum_of_squares = sum_of_squares + d * d
+      end
+      variance = sum_of_squares / (stats.count - 1)
    end
-   stats.stddev = math.sqrt(sum_of_squares / (stats.count - 1))
+   stats.stddev = math.sqrt(variance)
 
    return stats
 end
