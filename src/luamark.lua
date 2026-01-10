@@ -385,7 +385,7 @@ end
 
 -- ----------------------------------------------------------------------------
 -- Benchmark
--- -----------------------------------------------s-----------------------------
+-- ----------------------------------------------------------------------------
 
 ---@alias Measure fun(fn: NoArgFun, iterations: integer, setup?: function, teardown?: function): number, number
 
@@ -424,7 +424,7 @@ local function calibrate_iterations(fn, setup, teardown)
       if round_total >= min_time then
          break
       end
-      local scale = min_time / (round_total > 0) and round_total or get_min_clocktime()
+      local scale = min_time / ((round_total > 0) and round_total or get_min_clocktime())
       iterations = mceil(iterations * scale)
       if iterations <= 1 then
          iterations = 1
