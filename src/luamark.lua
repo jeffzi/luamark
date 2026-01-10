@@ -179,7 +179,7 @@ end
 ---@param key string The stats to rank by.
 ---@return {[string]:{[string]: any}}
 local function rank(benchmark_results, key)
-   assert(benchmark_results, "'benchmark_results' is nil or empty.")
+   assert(benchmark_results and next(benchmark_results), "'benchmark_results' is nil or empty.")
 
    local ranks = {}
    for benchmark_name, stats in pairs(benchmark_results) do
@@ -252,7 +252,7 @@ local function format_stat(value, base_unit)
       end
    end
 
-   return math.floor(value) .. base_unit
+   return mfloor(value) .. base_unit
 end
 
 --- Formats statistical measurements into a readable string.
@@ -335,6 +335,7 @@ local SUMMARIZE_HEADERS = {
 ---@param format? "plain"|"markdown" The output format
 ---@return string
 function luamark.summarize(benchmark_results, format)
+   assert(benchmark_results and next(benchmark_results), "'benchmark_results' is nil or empty.")
    format = format or "plain"
    assert(format == "plain" or format == "markdown", "format must be 'plain' or 'markdown'")
 
@@ -414,7 +415,9 @@ local measure_time = build_measure(measure_time_once, clock_precision)
 local measure_memory = build_measure(measure_memory_once, 4)
 
 ---@param fn NoArgFun The function to benchmark.
----@return number # Duration of a round.
+---@param setup? function Function executed before each iteration.
+---@param teardown? function Function executed after each iteration.
+---@return integer # Number of iterations per round.
 local function calibrate_iterations(fn, setup, teardown)
    local min_time = get_min_clocktime() * CALIBRATION_PRECISION
    local iterations = 1
