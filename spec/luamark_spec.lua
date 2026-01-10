@@ -361,14 +361,45 @@ describe("rank", function()
       assert.are.same({ rank = 2, mean = 10, median = 18, ratio = 2.25 }, data["test1"])
    end)
 
-   test("error", function()
-      assert.has.errors(function()
+   test("empty table error", function()
+      assert.has.error(function()
          luamark.rank({}, "foo")
-      end)
-      assert.has.errors(function()
+      end, "'benchmark_results' is nil or empty.")
+   end)
+
+   test("nil error", function()
+      assert.has.error(function()
          ---@diagnostic disable-next-line: param-type-mismatch
          luamark.rank(nil, "bar")
-      end)
+      end, "'benchmark_results' is nil or empty.")
+   end)
+end)
+
+describe("summarize", function()
+   local luamark
+
+   setup(function()
+      _G._TEST = true
+      luamark = require(SRC_PATH)
+   end)
+
+   test("empty table error", function()
+      assert.has.error(function()
+         luamark.summarize({})
+      end, "'benchmark_results' is nil or empty.")
+   end)
+
+   test("nil error", function()
+      assert.has.error(function()
+         ---@diagnostic disable-next-line: param-type-mismatch
+         luamark.summarize(nil)
+      end, "'benchmark_results' is nil or empty.")
+   end)
+
+   test("invalid format error", function()
+      assert.has.error(function()
+         luamark.summarize({ test = { median = 1 } }, "invalid")
+      end, "format must be 'plain' or 'markdown'")
    end)
 end)
 
