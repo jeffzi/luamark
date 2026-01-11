@@ -172,6 +172,7 @@ local function calculate_stats(samples)
       variance = sum_of_squares / (stats.count - 1)
    end
    stats.stddev = msqrt(variance)
+   stats.samples = samples
 
    return stats
 end
