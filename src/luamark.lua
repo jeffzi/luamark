@@ -6,13 +6,6 @@ local luamark = {
    _VERSION = "0.9.0",
 }
 
-local tconcat, table_insert, tsort = table.concat, table.insert, table.sort
-local mmin, mmax, mhuge = math.min, math.max, math.huge
-local msqrt, mfloor, mceil, mfmod = math.sqrt, math.floor, math.ceil, math.fmod
-local string_format, string_len, string_rep = string.format, string.len, string.rep
-local pairs, ipairs, collectgarbage = pairs, ipairs, collectgarbage
-local os_date = os.date
-
 -- ----------------------------------------------------------------------------
 -- Config
 -- ----------------------------------------------------------------------------
@@ -39,7 +32,7 @@ local function get_min_clocktime()
 end
 
 local CLOCK_PRIORITIES = { "chronos", "posix.time", "socket" }
---Dispatch loaded module to a function that returns the clock function and clock precision.
+-- Dispatch loaded module to a function that returns the clock function and clock precision.
 local CLOCKS = {
    chronos = function(chronos)
       return chronos.nanotime, 9
@@ -109,10 +102,32 @@ do
    end
 end
 
+local DEFAULT_TERM_WIDTH = 100
+
+---@return integer
+local get_term_width
+do
+   local ok, system = pcall(require, "system")
+   if ok and system.termsize then
+      get_term_width = function()
+         local rows, cols = system.termsize()
+         if rows and cols then
+            return cols
+         end
+         return DEFAULT_TERM_WIDTH
+      end
+   else
+      get_term_width = function()
+         return DEFAULT_TERM_WIDTH
+      end
+   end
+end
+
 -- ----------------------------------------------------------------------------
 -- Utils
 -- ----------------------------------------------------------------------------
 
+-- Offset above 0.5 to handle floating-point edge cases in rounding
 local half = 0.50000000000008
 
 ---@param num number
@@ -122,11 +137,11 @@ local function math_round(num, precision)
    local mul = 10 ^ (precision or 0)
    local rounded
    if num > 0 then
-      rounded = mfloor(num * mul + half) / mul
+      rounded = math.floor(num * mul + half) / mul
    else
-      rounded = mceil(num * mul - half) / mul
+      rounded = math.ceil(num * mul - half) / mul
    end
-   return mmax(rounded, 10 ^ -(precision or 0))
+   return math.max(rounded, 10 ^ -(precision or 0))
 end
 
 -- ----------------------------------------------------------------------------
@@ -151,27 +166,27 @@ end
 ---@field ratio? number Ratio relative to fastest benchmark.
 
 ---@param samples number[]
----@return Stats
+---@return table
 local function calculate_stats(samples)
    local stats = {}
 
    stats.count = #samples
 
-   tsort(samples)
-   local mid = mfloor(#samples / 2)
-   if mfmod(#samples, 2) == 0 then
+   table.sort(samples)
+   local mid = math.floor(#samples / 2)
+   if math.fmod(#samples, 2) == 0 then
       stats.median = (samples[mid] + samples[mid + 1]) / 2
    else
       stats.median = samples[mid + 1]
    end
 
    stats.total = 0
-   local min, max = mhuge, -mhuge
+   local min, max = math.huge, -math.huge
    for i = 1, stats.count do
       local sample = samples[i]
       stats.total = stats.total + sample
-      min = mmin(sample, min)
-      max = mmax(sample, max)
+      min = math.min(sample, min)
+      max = math.max(sample, max)
    end
 
    stats.min = min
@@ -187,7 +202,7 @@ local function calculate_stats(samples)
       end
       variance = sum_of_squares / (stats.count - 1)
    end
-   stats.stddev = msqrt(variance)
+   stats.stddev = math.sqrt(variance)
    stats.samples = samples
 
    return stats
@@ -203,10 +218,10 @@ local function rank(benchmark_results, key)
 
    local ranks = {}
    for benchmark_name, stats in pairs(benchmark_results) do
-      table_insert(ranks, { name = benchmark_name, value = stats[key] })
+      table.insert(ranks, { name = benchmark_name, value = stats[key] })
    end
 
-   tsort(ranks, function(a, b)
+   table.sort(ranks, function(a, b)
       return a.value < b.value
    end)
 
@@ -263,7 +278,7 @@ local function format_stat(value, base_unit)
    for _, unit in ipairs(units) do
       local symbol, threshold = unit[1], unit[2]
       if value >= threshold then
-         return trim_zeroes(string_format("%.2f", value / threshold)) .. symbol
+         return trim_zeroes(string.format("%.2f", value / threshold)) .. symbol
       end
    end
 
@@ -276,7 +291,7 @@ end
 ---@param unit default_unit
 ---@return string # A formatted string representing the statistical metrics.
 local function __tostring_stats(stats, unit)
-   return string_format(
+   return string.format(
       "%s ± %s per round (%d rounds)",
       format_stat(stats.mean, unit),
       format_stat(stats.stddev, unit),
@@ -291,7 +306,7 @@ local function format_row(stats)
    local row = {}
    for name, value in pairs(stats) do
       if name == "ratio" then
-         row[name] = string_format("%.2f", value)
+         row[name] = string.format("%.2f", value)
       elseif
          name == "min"
          or name == "max"
@@ -311,36 +326,103 @@ end
 ---@param width integer
 ---@return string
 local function pad(content, width)
-   local padding = width - string_len(content)
-   return content .. string_rep(" ", padding)
+   local padding = width - string.len(content)
+   return content .. string.rep(" ", padding)
 end
 
 ---@param content string
 ---@param expected_width integer
 ---@return string
 local function center(content, expected_width)
-   local total_padding_size = expected_width - string_len(content)
+   local total_padding_size = expected_width - string.len(content)
    if total_padding_size < 0 then
       total_padding_size = 0
    end
 
-   local left_padding_size = mfloor(total_padding_size / 2)
+   local left_padding_size = math.floor(total_padding_size / 2)
    local right_padding_size = total_padding_size - left_padding_size
 
-   local left_padding = string_rep(" ", left_padding_size)
-   local right_padding = string_rep(" ", right_padding_size)
+   local left_padding = string.rep(" ", left_padding_size)
+   local right_padding = string.rep(" ", right_padding_size)
 
    return left_padding .. content .. right_padding
 end
 
 ---@param t string[]
----@param format? "plain"|"markdown"
+---@param format? "plain"|"compact"|"markdown"
 ---@return string
 local function concat_line(t, format)
    if format == "plain" then
-      return tconcat(t, "  ")
+      return table.concat(t, "  ")
    end
-   return "| " .. tconcat(t, " | ") .. " |"
+   return "| " .. table.concat(t, " | ") .. " |"
+end
+
+local BAR_CHAR = "█"
+local BAR_MAX_WIDTH = 20
+local BAR_MIN_WIDTH = 10
+local NAME_MIN_WIDTH = 4
+local ELLIPSIS = "..."
+
+---@param name string
+---@param max_len integer
+---@return string
+local function truncate_name(name, max_len)
+   if #name <= max_len then
+      return name
+   end
+   if max_len <= #ELLIPSIS then
+      return name:sub(1, max_len)
+   end
+   return name:sub(1, max_len - #ELLIPSIS) .. ELLIPSIS
+end
+
+---@param rows {name: string, ratio: string, median: string}[]
+---@param max_width? integer
+---@return string[]
+local function build_bar_chart(rows, max_width)
+   max_width = max_width or get_term_width()
+
+   local max_ratio = 1
+   local max_suffix_len = 0
+   local max_name_len = NAME_MIN_WIDTH
+   for i = 1, #rows do
+      local row = rows[i]
+      local ratio = tonumber(row.ratio) or 1
+      if ratio > max_ratio then
+         max_ratio = ratio
+      end
+      local suffix_len = 5 + #row.ratio + #row.median
+      if suffix_len > max_suffix_len then
+         max_suffix_len = suffix_len
+      end
+      if #row.name > max_name_len then
+         max_name_len = #row.name
+      end
+   end
+
+   local available = max_width - 3 - max_suffix_len
+   -- Bar gets up to BAR_MAX_WIDTH, leaving at least NAME_MIN_WIDTH for names
+   local bar_max = math.min(BAR_MAX_WIDTH, available - NAME_MIN_WIDTH)
+   bar_max = math.max(BAR_MIN_WIDTH, bar_max)
+   -- Names get remaining space, capped at actual max name length
+   local name_max = math.max(NAME_MIN_WIDTH, math.min(max_name_len, available - bar_max))
+
+   local lines = {}
+   for i = 1, #rows do
+      local row = rows[i]
+      local ratio = tonumber(row.ratio) or 1
+      local bar_width = math.max(1, math.floor((ratio / max_ratio) * bar_max))
+      local name = pad(truncate_name(row.name, name_max), name_max)
+      lines[i] = string.format(
+         "%s  |%s %sx (%s)",
+         name,
+         string.rep(BAR_CHAR, bar_width),
+         row.ratio,
+         row.median
+      )
+   end
+   return lines
 end
 
 local SUMMARIZE_HEADERS = {
@@ -355,58 +437,99 @@ local SUMMARIZE_HEADERS = {
    "rounds",
 }
 
+---@param rows table[]
+---@param widths integer[]
+---@param format "plain"|"compact"|"markdown"
+---@return string[]
+local function build_table(rows, widths, format)
+   local lines = {}
+
+   local header_cells, underline_cells = {}, {}
+   for i, header in ipairs(SUMMARIZE_HEADERS) do
+      header_cells[i] = center(header:gsub("^%l", string.upper), widths[i])
+      underline_cells[i] = string.rep("-", widths[i])
+   end
+   lines[1] = concat_line(header_cells, format)
+   lines[2] = concat_line(underline_cells, format)
+
+   for r, row in ipairs(rows) do
+      local cells = {}
+      for i, header in ipairs(SUMMARIZE_HEADERS) do
+         cells[i] = pad(row[header], widths[i])
+      end
+      lines[r + 2] = concat_line(cells, format)
+   end
+
+   return lines
+end
+
 ---Return a string summarizing the results of multiple benchmarks.
 ---@param benchmark_results {[string]: Stats} The benchmark results to summarize, indexed by name.
----@param format? "plain"|"markdown" The output format
+---@param format? "plain"|"compact"|"markdown" The output format
 ---@return string
 function luamark.summarize(benchmark_results, format)
    assert(benchmark_results and next(benchmark_results), "'benchmark_results' is nil or empty.")
    format = format or "plain"
-   assert(format == "plain" or format == "markdown", "format must be 'plain' or 'markdown'")
+   assert(
+      format == "plain" or format == "compact" or format == "markdown",
+      "format must be 'plain', 'compact', or 'markdown'"
+   )
 
-   -- Format rows
    benchmark_results = rank(benchmark_results, "median")
    local rows = {}
-   for benchmark_name, stats in pairs(benchmark_results) do
-      local formatted = format_row(stats)
-      formatted["name"] = benchmark_name
-      table_insert(rows, formatted)
+   for name, stats in pairs(benchmark_results) do
+      local row = format_row(stats)
+      row.name = name
+      rows[#rows + 1] = row
    end
-   tsort(rows, function(a, b)
+   table.sort(rows, function(a, b)
       return tonumber(a.rank) < tonumber(b.rank)
    end)
 
-   -- Calculate column widths
+   if format == "compact" then
+      return table.concat(build_bar_chart(rows), "\n")
+   end
+
    local widths = {}
    for i, header in ipairs(SUMMARIZE_HEADERS) do
       widths[i] = #header
       for _, row in ipairs(rows) do
-         widths[i] = math.max(widths[i], #tostring(row[header] or ""))
+         widths[i] = math.max(widths[i], #(row[header] or ""))
       end
    end
 
-   local lines = {}
-
-   -- Header row
-   local header_row, header_underline = {}, {}
-   for i, header in ipairs(SUMMARIZE_HEADERS) do
-      header = header:gsub("^%l", string.upper)
-      table_insert(header_row, center(header, widths[i]))
-      table_insert(header_underline, string_rep("-", widths[i]))
-   end
-   table_insert(lines, concat_line(header_row, format))
-   table_insert(lines, concat_line(header_underline, format))
-
-   -- Data rows
-   for _, row in ipairs(rows) do
-      local cells = {}
-      for i, header in ipairs(SUMMARIZE_HEADERS) do
-         cells[#cells + 1] = pad(row[header], widths[i])
+   if format == "plain" then
+      local other_width = 0
+      for i = 2, #SUMMARIZE_HEADERS do
+         other_width = other_width + widths[i]
       end
-      lines[#lines + 1] = concat_line(cells, format)
+      local max_name =
+         math.max(NAME_MIN_WIDTH, get_term_width() - other_width - (#SUMMARIZE_HEADERS - 1) * 2)
+      if widths[1] > max_name then
+         widths[1] = max_name
+         for _, row in ipairs(rows) do
+            row.name = truncate_name(row.name, max_name)
+         end
+      end
    end
 
-   return tconcat(lines, "\n")
+   local lines = build_table(rows, widths, format)
+
+   if format == "plain" then
+      local table_width = 0
+      for i = 1, #widths do
+         table_width = table_width + widths[i]
+      end
+      table_width = table_width + (#SUMMARIZE_HEADERS - 1) * 2
+
+      lines[#lines + 1] = ""
+      local bar_chart = build_bar_chart(rows, table_width)
+      for i = 1, #bar_chart do
+         lines[#lines + 1] = bar_chart[i]
+      end
+   end
+
+   return table.concat(lines, "\n")
 end
 
 -- ----------------------------------------------------------------------------
@@ -453,7 +576,7 @@ local function calibrate_iterations(fn, setup, teardown)
          break
       end
       local scale = min_time / ((round_total > 0) and round_total or get_min_clocktime())
-      iterations = mceil(iterations * scale)
+      iterations = math.ceil(iterations * scale)
       if iterations <= 1 then
          iterations = 1
          break
@@ -472,8 +595,8 @@ end
 ---@return integer rounds
 ---@return integer max_time
 local function calibrate_stop(round_duration)
-   local max_time = mmax(config.min_rounds * round_duration, MIN_TIME)
-   local rounds = mceil(mmin(max_time / round_duration, config.max_rounds))
+   local max_time = math.max(config.min_rounds * round_duration, MIN_TIME)
+   local rounds = math.ceil(math.min(max_time / round_duration, config.max_rounds))
    return rounds, max_time
 end
 
@@ -486,7 +609,7 @@ end
 ---@param max_time? number Maximum run time. It may be exceeded if test function is very slow.
 ---@param setup? function Function executed before computing each benchmark value.
 ---@param teardown? function Function executed after computing each benchmark value.
----@return table # A table containing the results of the benchmark .
+---@return Stats
 local function single_benchmark(fn, measure, disable_gc, unit, rounds, max_time, setup, teardown)
    assert(type(fn) == "function", "'fn' must be a function.")
    assert(not rounds or rounds > 0, "'rounds' must be > 0.")
@@ -502,7 +625,7 @@ local function single_benchmark(fn, measure, disable_gc, unit, rounds, max_time,
       measure(fn, iterations, setup, teardown)
    end
 
-   local timestamp = os_date("!%Y-%m-%d %H:%M:%SZ") --[[@as string]]
+   local timestamp = os.date("!%Y-%m-%d %H:%M:%SZ") --[[@as string]]
    local samples = {}
    local completed_rounds = 0
    local total_duration = 0
@@ -538,6 +661,7 @@ local function single_benchmark(fn, measure, disable_gc, unit, rounds, max_time,
    results.warmups = config.warmups
    results.timestamp = timestamp
    results.unit = unit
+   ---@cast results Stats
 
    setmetatable(results, {
       __tostring = function(self)
@@ -550,12 +674,13 @@ end
 
 ---@param funcs fun()|({[string]: fun()}) A single zero-argument function or a table of zero-argument functions indexed by name.
 ---@param ... any arguments that will be forwarded to `single_benchmark`.
----@return {[string]:any}|{[string]:{[string]: any}} # A table of statistical measurements for the function(s) benchmarked, indexed by the function name if multiple functions were given.
+---@return Stats|{[string]: Stats} # Stats for single function, or table of Stats indexed by name for multiple functions.
 local function benchmark(funcs, ...)
    if type(funcs) == "function" then
       return single_benchmark(funcs, ...)
    end
 
+   ---@type {[string]: Stats}
    local results = {}
    for name, fn in pairs(funcs) do
       results[name] = single_benchmark(fn, ...)
@@ -591,7 +716,7 @@ local function check_options(opts)
          error("Unknown option: " .. k)
       end
       if type(v) ~= opt_type then
-         error(string_format("Option '%s' should be %s", k, opt_type))
+         error(string.format("Option '%s' should be %s", k, opt_type))
       end
    end
 end
@@ -634,8 +759,10 @@ function luamark.memit(fn, opts)
    )
 end
 
+---@package
 luamark._internal = {
    CALIBRATION_PRECISION = CALIBRATION_PRECISION,
+   DEFAULT_TERM_WIDTH = DEFAULT_TERM_WIDTH,
    calculate_stats = calculate_stats,
    format_stat = format_stat,
    get_min_clocktime = get_min_clocktime,

@@ -1,4 +1,4 @@
----@diagnostic disable: undefined-field, unused-local
+---@diagnostic disable: undefined-field, unused-local, invisible, different-requires
 
 -- ----------------------------------------------------------------------------
 -- Helpers
@@ -17,6 +17,7 @@ end
 local chronos = try_require("chronos")
 local posix_time = try_require("posix.time")
 local socket = try_require("socket")
+local system = try_require("system")
 
 local CLOCKS = { "chronos" }
 if posix_time.clock_gettime then
@@ -415,7 +416,140 @@ describe("summarize", function()
    test("invalid format error", function()
       assert.has.error(function()
          luamark.summarize({ test = { median = 1 } }, "invalid")
-      end, "format must be 'plain' or 'markdown'")
+      end, "format must be 'plain', 'compact', or 'markdown'")
+   end)
+
+   test("plain format includes table and bar chart", function()
+      local results = {
+         fast = {
+            median = 100,
+            mean = 100,
+            min = 90,
+            max = 110,
+            stddev = 5,
+            rounds = 10,
+            unit = "s",
+         },
+         slow = {
+            median = 300,
+            mean = 300,
+            min = 280,
+            max = 320,
+            stddev = 10,
+            rounds = 10,
+            unit = "s",
+         },
+      }
+      luamark._internal.rank(results, "median")
+      local output = luamark.summarize(results, "plain")
+      assert.matches("Name", output)
+      assert.matches("fast.*|.*1%.00x", output)
+      assert.matches("slow.*|.*3%.00x", output)
+   end)
+
+   test("compact format shows only bar chart", function()
+      local results = {
+         fast = {
+            median = 100,
+            mean = 100,
+            min = 90,
+            max = 110,
+            stddev = 5,
+            rounds = 10,
+            unit = "s",
+         },
+         slow = {
+            median = 300,
+            mean = 300,
+            min = 280,
+            max = 320,
+            stddev = 10,
+            rounds = 10,
+            unit = "s",
+         },
+      }
+      luamark._internal.rank(results, "median")
+      local output = luamark.summarize(results, "compact")
+      assert.not_matches("Name", output)
+      assert.matches("fast.*|.*1%.00x", output)
+      assert.matches("slow.*|.*3%.00x", output)
+   end)
+
+   test("plain and compact truncate long names to fit terminal width", function()
+      local results = {
+         very_long_function_name_that_should_definitely_be_truncated_to_fit_the_terminal_width_limit = {
+            median = 100,
+            mean = 100,
+            min = 90,
+            max = 110,
+            stddev = 5,
+            rounds = 10,
+            unit = "s",
+         },
+         short = {
+            median = 500,
+            mean = 500,
+            min = 450,
+            max = 550,
+            stddev = 10,
+            rounds = 10,
+            unit = "s",
+         },
+      }
+      luamark._internal.rank(results, "median")
+
+      local max_width = luamark._internal.DEFAULT_TERM_WIDTH
+      for _, fmt in ipairs({ "plain", "compact" }) do
+         local output = luamark.summarize(results, fmt)
+         for line in output:gmatch("[^\n]+") do
+            local display_width = 0
+            for _ in line:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
+               display_width = display_width + 1
+            end
+            assert(
+               display_width <= max_width,
+               string.format(
+                  "%s: line exceeds %d chars (%d): %s",
+                  fmt,
+                  max_width,
+                  display_width,
+                  line
+               )
+            )
+         end
+         assert.matches("%.%.%.", output)
+      end
+   end)
+
+   test("short names are not truncated", function()
+      local results = {
+         fast = {
+            median = 100,
+            mean = 100,
+            min = 90,
+            max = 110,
+            stddev = 5,
+            rounds = 10,
+            unit = "s",
+         },
+         slow = {
+            median = 500,
+            mean = 500,
+            min = 450,
+            max = 550,
+            stddev = 10,
+            rounds = 10,
+            unit = "s",
+         },
+      }
+      luamark._internal.rank(results, "median")
+
+      for _, fmt in ipairs({ "plain", "compact" }) do
+         local output = luamark.summarize(results, fmt)
+         assert.not_matches("%.%.%.", output)
+         assert.matches("fast", output)
+         assert.matches("slow", output)
+      end
    end)
 end)
 
