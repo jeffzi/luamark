@@ -48,9 +48,10 @@ local CLOCKS = {
       if not clock_gettime then
          error("posix.time.clock_gettime is not supported on this OS.")
       end
+      local NANO_TO_SEC = 1e-9
       clock = function()
          local time_spec = clock_gettime(CLOCK_MONOTONIC)
-         return time_spec.tv_sec + time_spec.tv_nsec * get_min_clocktime()
+         return time_spec.tv_sec + time_spec.tv_nsec * NANO_TO_SEC
       end
       return clock, 9
    end,
