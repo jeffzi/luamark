@@ -6,9 +6,10 @@ local luamark = {
    _VERSION = "0.9.0",
 }
 
-local tconcat, tinsert, tsort = table.concat, table.insert, table.sort
+local tconcat, table_insert, tsort = table.concat, table.insert, table.sort
 local mmin, mmax, mhuge = math.min, math.max, math.huge
 local msqrt, mfloor, mceil, mfmod = math.sqrt, math.floor, math.ceil, math.fmod
+local string_format, string_len, string_rep = string.format, string.len, string.rep
 local pairs, ipairs, collectgarbage = pairs, ipairs, collectgarbage
 local os_date = os.date
 
@@ -185,7 +186,7 @@ local function rank(benchmark_results, key)
 
    local ranks = {}
    for benchmark_name, stats in pairs(benchmark_results) do
-      tinsert(ranks, { name = benchmark_name, value = stats[key] })
+      table_insert(ranks, { name = benchmark_name, value = stats[key] })
    end
 
    tsort(ranks, function(a, b)
@@ -245,7 +246,7 @@ local function format_stat(value, base_unit)
    for _, unit in ipairs(units) do
       local symbol, threshold = unit[1], unit[2]
       if value >= threshold then
-         return trim_zeroes(string.format("%.2f", value / threshold)) .. symbol
+         return trim_zeroes(string_format("%.2f", value / threshold)) .. symbol
       end
    end
 
@@ -258,7 +259,7 @@ end
 ---@param unit default_unit
 ---@return string # A formatted string representing the statistical metrics.
 local function __tostring_stats(stats, unit)
-   return string.format(
+   return string_format(
       "%s ± %s per round (%d rounds)",
       format_stat(stats.mean, unit),
       format_stat(stats.stddev, unit),
@@ -273,7 +274,7 @@ local function format_row(stats)
    local row = {}
    for name, value in pairs(stats) do
       if name == "ratio" then
-         row[name] = string.format("%.2f", value)
+         row[name] = string_format("%.2f", value)
       elseif
          name == "min"
          or name == "max"
@@ -293,24 +294,24 @@ end
 ---@param width integer
 ---@return string
 local function pad(content, width)
-   local padding = width - string.len(content)
-   return content .. string.rep(" ", padding)
+   local padding = width - string_len(content)
+   return content .. string_rep(" ", padding)
 end
 
 ---@param content string
 ---@param expected_width integer
 ---@return string
 local function center(content, expected_width)
-   local total_padding_size = expected_width - string.len(content)
+   local total_padding_size = expected_width - string_len(content)
    if total_padding_size < 0 then
       total_padding_size = 0
    end
 
-   local left_padding_size = math.floor(total_padding_size / 2)
+   local left_padding_size = mfloor(total_padding_size / 2)
    local right_padding_size = total_padding_size - left_padding_size
 
-   local left_padding = string.rep(" ", left_padding_size)
-   local right_padding = string.rep(" ", right_padding_size)
+   local left_padding = string_rep(" ", left_padding_size)
+   local right_padding = string_rep(" ", right_padding_size)
 
    return left_padding .. content .. right_padding
 end
@@ -352,7 +353,7 @@ function luamark.summarize(benchmark_results, format)
    for benchmark_name, stats in pairs(benchmark_results) do
       local formatted = format_row(stats)
       formatted["name"] = benchmark_name
-      tinsert(rows, formatted)
+      table_insert(rows, formatted)
    end
    tsort(rows, function(a, b)
       return tonumber(a.rank) < tonumber(b.rank)
@@ -373,11 +374,11 @@ function luamark.summarize(benchmark_results, format)
    local header_row, header_underline = {}, {}
    for i, header in ipairs(SUMMARIZE_HEADERS) do
       header = header:gsub("^%l", string.upper)
-      tinsert(header_row, center(header, widths[i]))
-      tinsert(header_underline, string.rep("-", widths[i]))
+      table_insert(header_row, center(header, widths[i]))
+      table_insert(header_underline, string_rep("-", widths[i]))
    end
-   tinsert(lines, concat_line(header_row, format))
-   tinsert(lines, concat_line(header_underline, format))
+   table_insert(lines, concat_line(header_row, format))
+   table_insert(lines, concat_line(header_underline, format))
 
    -- Data rows
    for _, row in ipairs(rows) do
@@ -573,7 +574,7 @@ local function check_options(opts)
          error("Unknown option: " .. k)
       end
       if type(v) ~= opt_type then
-         error(string.format("Option '%s' should be %s", k, opt_type))
+         error(string_format("Option '%s' should be %s", k, opt_type))
       end
    end
 end
