@@ -124,7 +124,7 @@ local function math_round(num, precision)
    else
       rounded = mceil(num * mul - half) / mul
    end
-   return mmax(rounded, 10 ^ -precision)
+   return mmax(rounded, 10 ^ -(precision or 0))
 end
 
 -- ----------------------------------------------------------------------------
@@ -140,14 +140,15 @@ local function calculate_stats(samples)
    stats.count = #samples
 
    tsort(samples)
+   local mid = mfloor(#samples / 2)
    if mfmod(#samples, 2) == 0 then
-      stats.median = (samples[#samples / 2] + samples[(#samples / 2) + 1]) / 2
+      stats.median = (samples[mid] + samples[mid + 1]) / 2
    else
-      stats.median = samples[mceil(#samples / 2)]
+      stats.median = samples[mid + 1]
    end
 
    stats.total = 0
-   local min, max = mhuge, 0
+   local min, max = mhuge, -mhuge
    for i = 1, stats.count do
       local sample = samples[i]
       stats.total = stats.total + sample
@@ -199,7 +200,7 @@ local function rank(benchmark_results, key)
          prev_value = entry.value
       end
       benchmark_results[entry.name].rank = rnk
-      benchmark_results[entry.name].ratio = rnk == 1 and 1 or entry.value / min
+      benchmark_results[entry.name].ratio = (rnk == 1 or min == 0) and 1 or entry.value / min
    end
    return benchmark_results
 end
@@ -210,49 +211,45 @@ end
 
 ---@alias default_unit `s` | `kb`
 
+-- Thresholds relative to input unit (seconds)
 local TIME_UNITS = {
-   { "m", 60 * 1e9 },
-   { "s", 1e9 },
-   { "ms", 1e6 },
-   { "us", 1e3 },
-   { "ns", 1 },
+   { "m", 60 },
+   { "s", 1 },
+   { "ms", 1e-3 },
+   { "us", 1e-6 },
+   { "ns", 1e-9 },
 }
 
+-- Thresholds relative to input unit (kilobytes)
 local MEMORY_UNITS = {
-   { "TB", 1024 ^ 4 },
-   { "GB", 1024 ^ 3 },
-   { "MB", 1024 ^ 2 },
-   { "kB", 1024 },
-   { "B", 1 },
+   { "TB", 1024 ^ 3 },
+   { "GB", 1024 ^ 2 },
+   { "MB", 1024 },
+   { "kB", 1 },
+   { "B", 1 / 1024 },
 }
 
+---@param str string
+---@return string
 local function trim_zeroes(str)
-   return str:gsub("%.?0+$", "")
+   return (str:gsub("%.?0+$", ""))
 end
 
----@param value integer
+---@param value number
 ---@param base_unit default_unit
 ---@return string
 local function format_stat(value, base_unit)
-   local units
-   if base_unit == "s" then
-      units = TIME_UNITS
-      base_unit = "ns"
-      value = value * 1e9
-   else
-      units = MEMORY_UNITS
-      base_unit = "B"
-      value = value * 1024
-   end
+   local units = base_unit == "s" and TIME_UNITS or MEMORY_UNITS
 
    for _, unit in ipairs(units) do
-      local symbol, factor = unit[1], unit[2]
-      if value >= factor then
-         return trim_zeroes(string.format("%.2f", value / factor)) .. symbol
+      local symbol, threshold = unit[1], unit[2]
+      if value >= threshold then
+         return trim_zeroes(string.format("%.2f", value / threshold)) .. symbol
       end
    end
 
-   return mfloor(value) .. base_unit
+   local smallest = units[#units]
+   return "0" .. smallest[1]
 end
 
 --- Formats statistical measurements into a readable string.
@@ -268,6 +265,8 @@ local function __tostring_stats(stats, unit)
    )
 end
 
+---@param stats table
+---@return table<string, string>
 local function format_row(stats)
    local unit = stats.unit
    local row = {}
@@ -289,11 +288,17 @@ local function format_row(stats)
    return row
 end
 
+---@param content string
+---@param width integer
+---@return string
 local function pad(content, width)
    local padding = width - string.len(content)
    return content .. string.rep(" ", padding)
 end
 
+---@param content string
+---@param expected_width integer
+---@return string
 local function center(content, expected_width)
    local total_padding_size = expected_width - string.len(content)
    if total_padding_size < 0 then
@@ -311,6 +316,7 @@ end
 
 ---@param t string[]
 ---@param format? "plain"|"markdown"
+---@return string
 local function concat_line(t, format)
    if format == "plain" then
       return tconcat(t, "  ")
@@ -609,16 +615,15 @@ function luamark.memit(fn, opts)
    )
 end
 
--- Expose private to busted
--- luacheck:ignore 113
-if _TEST then
-   luamark.CALIBRATION_PRECISION = CALIBRATION_PRECISION
-   luamark.format_stat = format_stat
-   luamark.get_min_clocktime = get_min_clocktime
-   luamark.rank = rank
-   luamark.measure_time = measure_time
-   luamark.measure_memory = measure_memory
-end
+luamark._internal = {
+   CALIBRATION_PRECISION = CALIBRATION_PRECISION,
+   calculate_stats = calculate_stats,
+   format_stat = format_stat,
+   get_min_clocktime = get_min_clocktime,
+   measure_memory = measure_memory,
+   measure_time = measure_time,
+   rank = rank,
+}
 
 return setmetatable(luamark, {
    __index = config,
