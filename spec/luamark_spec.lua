@@ -93,20 +93,16 @@ for _, clock_name in ipairs(CLOCKS) do
          assert.are_equal(clock_name, luamark.clock_name)
       end)
 
-      describe("base", function()
+      describe("timeit and memit", function()
          for name, benchmark in pairs({ timeit = luamark.timeit, memit = luamark.memit }) do
             local bench_suffix = string.format(" (%s)", name)
 
-            -- ----------------------------------------------------------------------------
-            -- test table stats
-            -- ----------------------------------------------------------------------------
-
-            test("single function " .. bench_suffix, function()
+            test("benchmarks single function" .. bench_suffix, function()
                local stats = benchmark(noop, { rounds = 1 })
                assert_stats_not_nil(stats)
             end)
 
-            test("multiple functions " .. bench_suffix, function()
+            test("benchmarks multiple functions" .. bench_suffix, function()
                local root_stats = benchmark({ a = noop, b = noop }, { rounds = 1 })
 
                assert.is_not_nil(root_stats.a)
@@ -119,10 +115,6 @@ for _, clock_name in ipairs(CLOCKS) do
                assert.equal(size, 2)
             end)
 
-            -- ----------------------------------------------------------------------------
-            -- test stop condition
-            -- ----------------------------------------------------------------------------
-
             local calls = 0
 
             local function counter()
@@ -134,17 +126,17 @@ for _, clock_name in ipairs(CLOCKS) do
             local rounds = 3
             local stats = benchmark(counter, { rounds = rounds })
 
-            test("count" .. bench_suffix, function()
+            test("tracks iteration count" .. bench_suffix, function()
                assert.are_equal(1, stats.iterations)
                assert.is_true(calls >= stats.count)
             end)
 
-            test("rounds" .. bench_suffix, function()
+            test("respects round limit" .. bench_suffix, function()
                assert.are_equal(rounds, stats.rounds)
                assert.are_equal(stats.count, stats.rounds * stats.iterations)
             end)
 
-            test("max_time" .. bench_suffix, function()
+            test("stops at max_time" .. bench_suffix, function()
                local function sleep_250ms()
                   socket.sleep(0.25)
                end
@@ -157,11 +149,7 @@ for _, clock_name in ipairs(CLOCKS) do
                assert.is_near(expected_max_time, actual_time, 0.3)
             end)
 
-            -- ----------------------------------------------------------------------------
-            -- test setup/teardown
-            -- ----------------------------------------------------------------------------
-
-            test("setup / teardown" .. bench_suffix, function()
+            test("runs setup and teardown" .. bench_suffix, function()
                local counter_calls, setup_calls, teardown_calls = 0, 0, 0
 
                local function counter()
@@ -204,19 +192,19 @@ for _, clock_name in ipairs(CLOCKS) do
 
          local stats = luamark.timeit(counter, { rounds = rounds, max_time = 1 })
 
-         test("min", function()
+         test("computes minimum time", function()
             assert.is_near(SLEEP_TIME, stats.min, TIME_TOL)
          end)
 
-         test("max", function()
+         test("computes maximum time", function()
             assert.is_near(max_sleep_time, stats.max, TIME_TOL * 2)
          end)
 
-         test("mean", function()
+         test("computes mean time", function()
             assert.near(SLEEP_TIME, stats.mean, TIME_TOL)
          end)
 
-         test("median", function()
+         test("computes median time", function()
             assert.near(SLEEP_TIME, stats.median, TIME_TOL)
          end)
       end)
@@ -264,42 +252,61 @@ end
 -- Test Errors
 -- ----------------------------------------------------------------------------
 
-describe("error", function()
+describe("validation", function()
    local luamark
 
    setup(function()
       luamark = require("luamark")
    end)
 
-   describe("validation", function()
-      for name, benchmark in pairs({ timeit = luamark.timeit, memit = luamark.memit }) do
-         local bench_suffix = string.format(" (%s)", name)
+   test("timeit rejects negative rounds", function()
+      assert.has.errors(function()
+         luamark.timeit(function() end, { rounds = -1 })
+      end)
+   end)
 
-         test("rounds " .. bench_suffix, function()
-            assert.has.errors(function()
-               benchmark(function() end, { rounds = -1 })
-            end)
-         end)
+   test("memit rejects negative rounds", function()
+      assert.has.errors(function()
+         luamark.memit(function() end, { rounds = -1 })
+      end)
+   end)
 
-         test("max_time" .. bench_suffix, function()
-            assert.has.errors(function()
-               benchmark(function() end, { max_time = -1 })
-            end)
-         end)
+   test("timeit rejects negative max_time", function()
+      assert.has.errors(function()
+         luamark.timeit(function() end, { max_time = -1 })
+      end)
+   end)
 
-         test("unknown option " .. bench_suffix, function()
-            assert.has.errors(function()
-               benchmark(function() end, { hello = "world" })
-            end)
-         end)
+   test("memit rejects negative max_time", function()
+      assert.has.errors(function()
+         luamark.memit(function() end, { max_time = -1 })
+      end)
+   end)
 
-         test("function " .. bench_suffix, function()
-            assert.has.errors(function()
-               ---@diagnostic disable-next-line: param-type-mismatch, missing-parameter
-               benchmark(nil)
-            end)
-         end)
-      end
+   test("timeit rejects unknown option", function()
+      assert.has.errors(function()
+         luamark.timeit(function() end, { hello = "world" })
+      end)
+   end)
+
+   test("memit rejects unknown option", function()
+      assert.has.errors(function()
+         luamark.memit(function() end, { hello = "world" })
+      end)
+   end)
+
+   test("timeit rejects nil function", function()
+      assert.has.errors(function()
+         ---@diagnostic disable-next-line: param-type-mismatch, missing-parameter
+         luamark.timeit(nil)
+      end)
+   end)
+
+   test("memit rejects nil function", function()
+      assert.has.errors(function()
+         ---@diagnostic disable-next-line: param-type-mismatch, missing-parameter
+         luamark.memit(nil)
+      end)
    end)
 end)
 
@@ -345,7 +352,7 @@ describe("rank", function()
       assert.are.equal(1.0, data["test3"].ratio)
    end)
 
-   test("keys", function()
+   test("ranks by specified key", function()
       local data = {
          ["test1"] = { mean = 10, median = 18 },
          ["test2"] = { mean = 20, median = 8 },
@@ -414,15 +421,15 @@ describe("format_stat", function()
       assert.are.equal("1.5TB", luamark.format_stat(tb + 512 * gb, "kb"))
    end)
 
-   test("convert s to ns", function()
+   test("converts seconds to nanoseconds", function()
       assert.are.equal("5ns", luamark.format_stat(5 / 1e9, "s"))
    end)
 
-   test("round < 1ns", function()
+   test("rounds sub-nanosecond to zero", function()
       assert.are.equal("0ns", luamark.format_stat(0.5 / 1e9, "s"))
    end)
 
-   test("round < 1B", function()
+   test("rounds sub-byte to zero", function()
       assert.are.equal("0B", luamark.format_stat(0.25 / 1024, "kb"))
    end)
 end)
