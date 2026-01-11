@@ -8,6 +8,6 @@
   "workspace.library": [],
   "diagnostics": {
     "globals": [],
-    "disable": ["lowercase-global", "redefined-local", "undefined-global"]
+    "disable": ["lowercase-global", "redefined-local", "undefined-global", "codestyle-check"]
   }
 }

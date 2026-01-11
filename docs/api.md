@@ -100,7 +100,7 @@ Benchmarks a function for memory usage. The memory usage is represented in kilob
 ## summarize
 
 ```lua
-function luamark.summarize(benchmark_results: { [string]: Stats }, format?: "plain"|"markdown")
+function luamark.summarize(benchmark_results: { [string]: Stats }, format?: "plain"|"compact"|"markdown")
   -> string
 ```
 
@@ -112,6 +112,7 @@ Return a string summarizing the results of multiple benchmarks.
 
 ```lua
 format:
-    | "plain"
-    | "markdown"
+    | "plain"    -- Table with bar chart
+    | "compact"  -- Bar chart only
+    | "markdown" -- Markdown table (no bar chart)
 ```
