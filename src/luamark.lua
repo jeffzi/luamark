@@ -133,9 +133,25 @@ end
 -- Statistics
 -- ----------------------------------------------------------------------------
 
---- Calculates measurements from timeit or memit samples..
----@param samples table The table of raw measurements from timeit or memit.
----@return table # A table of statistical measurements.
+---@class Stats
+---@field count integer Number of samples collected.
+---@field mean number Arithmetic mean of samples.
+---@field median number Median value of samples.
+---@field min number Minimum sample value.
+---@field max number Maximum sample value.
+---@field stddev number Standard deviation of samples.
+---@field total number Sum of all samples.
+---@field samples number[] Raw samples (sorted).
+---@field rounds integer Number of benchmark rounds executed.
+---@field iterations integer Number of iterations per round.
+---@field warmups integer Number of warmup rounds.
+---@field timestamp string ISO 8601 UTC timestamp of benchmark start.
+---@field unit "s"|"kb" Measurement unit (seconds or kilobytes).
+---@field rank? integer Rank when comparing multiple benchmarks.
+---@field ratio? number Ratio relative to fastest benchmark.
+
+---@param samples number[]
+---@return Stats
 local function calculate_stats(samples)
    local stats = {}
 
@@ -179,9 +195,9 @@ end
 
 --- Rank benchmark results (`timeit` or `memit`) by specified `key` and adds a 'rank' and 'ratio' key to each.
 --- The smallest attribute value gets the rank 1 and ratio 1.0, other ratios are relative to it.
----@param benchmark_results {[string]:{[string]: any}} The benchmark results to rank, indexed by name.
+---@param benchmark_results {[string]: Stats} The benchmark results to rank, indexed by name.
 ---@param key string The stats to rank by.
----@return {[string]:{[string]: any}}
+---@return {[string]: Stats}
 local function rank(benchmark_results, key)
    assert(benchmark_results and next(benchmark_results), "'benchmark_results' is nil or empty.")
 
@@ -340,7 +356,7 @@ local SUMMARIZE_HEADERS = {
 }
 
 ---Return a string summarizing the results of multiple benchmarks.
----@param benchmark_results {[string]:{[string]: any}} The benchmark results to summarize, indexed by name.
+---@param benchmark_results {[string]: Stats} The benchmark results to summarize, indexed by name.
 ---@param format? "plain"|"markdown" The output format
 ---@return string
 function luamark.summarize(benchmark_results, format)
@@ -486,7 +502,7 @@ local function single_benchmark(fn, measure, disable_gc, unit, rounds, max_time,
       measure(fn, iterations, setup, teardown)
    end
 
-   local timestamp = os_date("!%Y-%m-%d %H:%M:%SZ")
+   local timestamp = os_date("!%Y-%m-%d %H:%M:%SZ") --[[@as string]]
    local samples = {}
    local completed_rounds = 0
    local total_duration = 0
@@ -581,9 +597,9 @@ local function check_options(opts)
 end
 
 --- Benchmarks a function for execution time. The time is represented in seconds.
----@param fn fun()|({[string]: fun()}) A single zero-argument function or a table of zero-argument functions indexed by name.
+---@param fn fun()|{[string]: fun()} A single zero-argument function or a table of zero-argument functions indexed by name.
 ---@param opts? BenchmarkOptions Options table for configuring the benchmark.
----@return {[string]:any}|{[string]:{[string]: any}} # A table of statistical measurements for the function(s) benchmarked, indexed by the function name if multiple functions were given.
+---@return Stats|{[string]: Stats} # Stats for single function, or table of Stats indexed by name for multiple functions.
 function luamark.timeit(fn, opts)
    opts = opts or {}
    check_options(opts)
@@ -600,9 +616,9 @@ function luamark.timeit(fn, opts)
 end
 
 --- Benchmarks a function for memory usage. The memory usage is represented in kilobytes.
----@param fn fun()|({[string]: fun()}) A single zero-argument function or a table of zero-argument functions indexed by name.
+---@param fn fun()|{[string]: fun()} A single zero-argument function or a table of zero-argument functions indexed by name.
 ---@param opts? BenchmarkOptions Options table for configuring the benchmark.
----@return {[string]:any}|{[string]:{[string]: any}} # A table of statistical measurements for the function(s) benchmarked, indexed by the function name if multiple functions were given.
+---@return Stats|{[string]: Stats} # Stats for single function, or table of Stats indexed by name for multiple functions.
 function luamark.memit(fn, opts)
    opts = opts or {}
    check_options(opts)
