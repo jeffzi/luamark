@@ -5,7 +5,7 @@ ci:
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: check-added-large-files
       - id: check-case-conflict
@@ -26,9 +26,14 @@ repos:
         args: ["--markdown-linebreak-ext=md,markdown"]
 
   - repo: https://github.com/JohnnyMorganz/StyLua
-    rev: v2.1.0
+    rev: v2.3.1
     hooks:
       - id: stylua-github
+
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.47.0
+    hooks:
+      - id: markdownlint-fix
 
   - repo: https://github.com/lunarmodules/luacheck
     rev: v1.2.0

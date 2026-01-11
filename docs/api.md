@@ -50,7 +50,7 @@ Function executed after each iteration.
 Returned by `timeit` and `memit`.
 
 | Field | Type | Description |
-|-------|------|-------------|
+| ----- | ---- | ----------- |
 | count | integer | Number of samples collected |
 | mean | number | Arithmetic mean of samples |
 | median | number | Median value of samples |
