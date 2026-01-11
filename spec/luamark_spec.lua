@@ -79,12 +79,7 @@ for _, clock_name in ipairs(CLOCKS) do
       local luamark
 
       setup(function()
-         _G._TEST = true
          luamark = load_luamark(clock_name)
-      end)
-
-      teardown(function()
-         _G._TEST = nil
       end)
       -- ----------------------------------------------------------------------------
       -- Base tests
@@ -120,7 +115,9 @@ for _, clock_name in ipairs(CLOCKS) do
             local function counter()
                calls = calls + 1
                -- force 1 iteration per round
-               socket.sleep(luamark.get_min_clocktime() * luamark.CALIBRATION_PRECISION)
+               socket.sleep(
+                  luamark._internal.get_min_clocktime() * luamark._internal.CALIBRATION_PRECISION
+               )
             end
 
             local rounds = 3
@@ -142,7 +139,7 @@ for _, clock_name in ipairs(CLOCKS) do
                end
 
                local expected_max_time = 0.5
-               local actual_time = luamark.measure_time(function()
+               local actual_time = luamark._internal.measure_time(function()
                   benchmark(sleep_250ms, { rounds = 1e9, max_time = expected_max_time })
                end, 1)
                -- Tolerance for calculating stats, garbage collection, etc.
@@ -233,7 +230,7 @@ for _, clock_name in ipairs(CLOCKS) do
             local all_stats = luamark.memit(funcs, { rounds = 100 })
 
             for func_name, stats in pairs(all_stats) do
-               local single_call_memory = luamark.measure_memory(funcs[func_name], 1)
+               local single_call_memory = luamark._internal.measure_memory(funcs[func_name], 1)
 
                test("mean: " .. func_name, function()
                   assert.near(single_call_memory, stats.mean, MEMORY_TOL)
@@ -315,10 +312,25 @@ end)
 -- ----------------------------------------------------------------------------
 
 describe("rank", function()
-   local luamark
+   local luamark, rank
 
    setup(function()
       luamark = require("luamark")
+      rank = luamark._internal.rank
+   end)
+
+   test("handles zero minimum value", function()
+      local data = {
+         ["test1"] = { mean = 0 },
+         ["test2"] = { mean = 10 },
+      }
+      rank(data, "mean")
+      assert.are.equal(1, data["test1"].rank)
+      assert.are.equal(2, data["test2"].rank)
+      assert.are.equal(1, data["test1"].ratio)
+      -- Should not be inf or nan
+      assert.is_true(data["test2"].ratio < math.huge)
+      assert.is_false(data["test2"].ratio ~= data["test2"].ratio) -- NaN check
    end)
 
    test("unique values", function()
@@ -328,7 +340,7 @@ describe("rank", function()
          ["test3"] = { mean = 5 },
          ["test4"] = { mean = 12 },
       }
-      luamark.rank(data, "mean")
+      rank(data, "mean")
       assert.are.same({ rank = 1, mean = 5, ratio = 1 }, data["test3"])
       assert.are.same({ rank = 2, mean = 8, ratio = 1.6 }, data["test1"])
       assert.are.same({ rank = 3, mean = 12, ratio = 2.4 }, data["test4"])
@@ -341,7 +353,7 @@ describe("rank", function()
          ["test2"] = { mean = 10 },
          ["test3"] = { mean = 10 },
       }
-      luamark.rank(data, "mean")
+      rank(data, "mean")
 
       assert.are.equal(1, data["test1"].rank)
       assert.are.equal(1, data["test2"].rank)
@@ -357,25 +369,25 @@ describe("rank", function()
          ["test1"] = { mean = 10, median = 18 },
          ["test2"] = { mean = 20, median = 8 },
       }
-      luamark.rank(data, "mean")
+      rank(data, "mean")
       assert.are.same({ rank = 1, mean = 10, median = 18, ratio = 1 }, data["test1"])
       assert.are.same({ rank = 2, mean = 20, median = 8, ratio = 2 }, data["test2"])
 
-      luamark.rank(data, "median")
+      rank(data, "median")
       assert.are.same({ rank = 1, mean = 20, median = 8, ratio = 1.0 }, data["test2"])
       assert.are.same({ rank = 2, mean = 10, median = 18, ratio = 2.25 }, data["test1"])
    end)
 
    test("empty table error", function()
       assert.has.error(function()
-         luamark.rank({}, "foo")
+         rank({}, "foo")
       end, "'benchmark_results' is nil or empty.")
    end)
 
    test("nil error", function()
       assert.has.error(function()
          ---@diagnostic disable-next-line: param-type-mismatch
-         luamark.rank(nil, "bar")
+         rank(nil, "bar")
       end, "'benchmark_results' is nil or empty.")
    end)
 end)
@@ -384,7 +396,6 @@ describe("summarize", function()
    local luamark
 
    setup(function()
-      _G._TEST = true
       luamark = require("luamark")
    end)
 
@@ -408,29 +419,43 @@ describe("summarize", function()
    end)
 end)
 
-describe("format_stat", function()
-   local luamark
+describe("calculate_stats", function()
+   local calculate_stats
 
    setup(function()
-      _G._TEST = true
-      luamark = require("luamark")
+      calculate_stats = require("luamark")._internal.calculate_stats
+   end)
+
+   test("handles negative values", function()
+      local samples = { -5, -3, -1 }
+      local stats = calculate_stats(samples)
+      assert.are.equal(-1, stats.max)
+      assert.are.equal(-5, stats.min)
+   end)
+end)
+
+describe("format_stat", function()
+   local format_stat
+
+   setup(function()
+      format_stat = require("luamark")._internal.format_stat
    end)
 
    test("converts kilobytes to terabytes", function()
       local tb, gb = 1024 ^ 3, 1024 ^ 2
-      assert.are.equal("1.5TB", luamark.format_stat(tb + 512 * gb, "kb"))
+      assert.are.equal("1.5TB", format_stat(tb + 512 * gb, "kb"))
    end)
 
    test("converts seconds to nanoseconds", function()
-      assert.are.equal("5ns", luamark.format_stat(5 / 1e9, "s"))
+      assert.are.equal("5ns", format_stat(5 / 1e9, "s"))
    end)
 
    test("rounds sub-nanosecond to zero", function()
-      assert.are.equal("0ns", luamark.format_stat(0.5 / 1e9, "s"))
+      assert.are.equal("0ns", format_stat(0.5 / 1e9, "s"))
    end)
 
    test("rounds sub-byte to zero", function()
-      assert.are.equal("0B", luamark.format_stat(0.25 / 1024, "kb"))
+      assert.are.equal("0B", format_stat(0.25 / 1024, "kb"))
    end)
 end)
 
@@ -442,7 +467,6 @@ describe("config", function()
    local luamark
 
    setup(function()
-      _G._TEST = true
       luamark = require("luamark")
    end)
 
