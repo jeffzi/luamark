@@ -554,7 +554,7 @@ end
 
 ---@class BenchmarkOptions
 ---@field rounds? integer The number of times to run the benchmark. Defaults to a predetermined number if not provided.
----@field max_time? integer Maximum run time in seconds. It may be exceeded if test function is very slow.
+---@field max_time? number Maximum run time in seconds. It may be exceeded if test function is very slow.
 ---@field setup? fun()  Function executed before the measured function.
 ---@field teardown? fun() Function executed after the measured function.
 
@@ -631,6 +631,9 @@ return setmetatable(luamark, {
    __newindex = function(_, k, v)
       if config[k] == nil then
          error("Invalid config option: " .. k)
+      end
+      if type(v) ~= "number" or v <= 0 then
+         error("Config value must be a positive number")
       end
       config[k] = v
    end,

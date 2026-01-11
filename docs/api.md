@@ -5,7 +5,7 @@
 ### max_time
 
 ```lua
-integer?
+number?
 ```
 
 Maximum run time in seconds. It may be exceeded if test function is very slow.
