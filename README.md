@@ -6,25 +6,33 @@
 [![Luarocks](https://img.shields.io/luarocks/v/jeffzi/luamark?label=Luarocks&logo=Lua)](https://luarocks.org/modules/jeffzi/luamark)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-LuaMark is a lightweight, portable microbenchmarking library for the Lua programming language. It provides precise measurement of both execution time and memory usage through a simple yet powerful interface. Whether you're optimizing performance bottlenecks or validating code improvements, LuaMark offers the tools you need with minimal setup overhead.
+LuaMark is a lightweight, portable microbenchmarking library for the Lua programming
+language. It provides precise measurement of both execution time and memory usage through
+a simple yet powerful interface. Whether you're optimizing performance bottlenecks or
+validating code improvements, LuaMark offers the tools you need with minimal setup overhead.
 
 ## Features
 
-- **Time and Memory Measurement**: High-precision execution timing and memory allocation tracking
-  - Time: Increase timing precision with [Chronos](https://github.com/chronos-timetravel/chronos), [LuaPosix](https://github.com/luaposix/luaposix), or [LuaSocket](https://github.com/lunarmodules/luasocket)
-  - Memory: Enhance allocation tracking accuracy using [AllocSpy](https://github.com/siffiejoe/lua-allocspy)
-- **High-Precision Time Measurement**: Measure code execution time with configurable precision through multiple clock modules
-- **Memory Usage Tracking**: Monitor memory allocation patterns and footprint of Lua functions
-- **Comprehensive Statistics**: Get detailed performance insights including minimum, maximum, mean, median, and standard deviation
-- **Zero Configuration**: Start benchmarking immediately with sensible defaults while retaining full configurability
-- **Flexible Clock Support**: Choose from multiple high-precision clock modules including [chronos](https://github.com/chronos-timetravel/chronos), [luaposix](https://github.com/luaposix/luaposix), and [LuaSocket](https://github.com/diegonehab/luasocket)
-- **Advanced Memory Tracking**: Built-in memory tracking with optional enhanced precision through [AllocSpy](https://github.com/siffiejoe/lua-allocspy)
+- **Time and Memory Measurement**: High-precision execution timing and memory allocation
+  tracking
+  - Time: Increase timing precision with [Chronos][chronos], [LuaPosix][luaposix], or
+    [LuaSocket][luasocket]
+  - Memory: Enhance allocation tracking accuracy using [AllocSpy][allocspy]
+- **Comprehensive Statistics**: Get detailed performance insights including minimum,
+  maximum, mean, median, and standard deviation
+- **Zero Configuration**: Start benchmarking immediately with sensible defaults while
+  retaining full configurability
+
+[chronos]: https://github.com/ldrumm/chronos
+[luaposix]: https://github.com/luaposix/luaposix
+[luasocket]: https://github.com/lunarmodules/luasocket
+[allocspy]: https://github.com/siffiejoe/lua-allocspy
 
 ## Requirements
 
 - Lua 5.1, 5.2, 5.3, 5.4, LuaJIT 2.1 or Luau
-- Optional: [chronos](https://github.com/ldrumm/chronos), [luaposix](https://github.com/luaposix/luaposix), or [LuaSocket](https://github.com/lunarmodules/luasocket) for enhanced timing precision
-- Optional: [AllocSpy](https://github.com/siffiejoe/lua-allocspy) for enhanced memory tracking
+- Optional: [chronos], [luaposix], or [luasocket] for enhanced timing precision
+- Optional: [AllocSpy][allocspy] for enhanced memory tracking
 
 ## Installation
 
@@ -142,7 +150,8 @@ LuaMark uses a two-level measurement system to ensure accurate timing:
 
 1. Each measurement consists of multiple rounds
 2. Each round runs the code multiple times (iterations)
-3. The time for each round is divided by the number of iterations to get the average execution time
+3. The time for each round is divided by the number of iterations to get the average
+   execution time
 4. Statistics are computed across all rounds
 
 For example, with 1000 iterations and 100 rounds:
@@ -153,7 +162,8 @@ For example, with 1000 iterations and 100 rounds:
 
 This approach solves several problems:
 
-- **Clock Granularity**: By running multiple iterations per round, we can measure very fast operations accurately even with low-precision clocks
+- **Clock Granularity**: By running multiple iterations per round, we can measure very
+  fast operations accurately even with low-precision clocks
 - **Statistical Reliability**: Multiple rounds provide enough data points for meaningful statistics
 - **System Variability**: The two-level structure helps filter out system noise
 
@@ -172,18 +182,18 @@ end, {
 
 LuaMark automatically selects the best available clock module in this order:
 
-1. **[chronos](https://github.com/ldrumm/chronos)**
+1. **[chronos]**
 
    - Nanosecond precision
    - Cross-platform compatibility
    - Recommended for most use cases
 
-2. **[luaposix](https://github.com/luaposix/luaposix)**
+2. **[luaposix]**
 
    - High precision on supported platforms
    - Note: Not available on MacOS
 
-3. **[LuaSocket](https://github.com/lunarmodules/luasocket)**
+3. **[LuaSocket][luasocket]**
 
    - Fallback option with good precision
    - Wide platform support
@@ -194,7 +204,8 @@ LuaMark automatically selects the best available clock module in this order:
 
 ### Memory Tracking
 
-LuaMark provides built-in Lua memory monitoring and can achieve higher precision through [AllocSpy](https://github.com/siffiejoe/lua-allocspy) when available.
+LuaMark provides built-in Lua memory monitoring and can achieve higher precision through
+[AllocSpy][allocspy] when available.
 
 ## API Documentation
 
@@ -202,7 +213,8 @@ For detailed API information, please refer to the [API Documentation](docs/api.m
 
 ## Contributing
 
-Contributions to LuaMark are welcome and appreciated. Whether you're fixing bugs, improving documentation, or proposing new features, your help makes LuaMark better.
+Contributions to LuaMark are welcome and appreciated. Whether you're fixing bugs,
+improving documentation, or proposing new features, your help makes LuaMark better.
 
 ## License
 
