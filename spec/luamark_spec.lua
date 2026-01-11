@@ -1,6 +1,4 @@
 ---@diagnostic disable: undefined-field, unused-local
----@
-local SRC_PATH = "src.luamark"
 
 -- ----------------------------------------------------------------------------
 -- Helpers
@@ -8,8 +6,10 @@ local SRC_PATH = "src.luamark"
 
 local lua_require = require
 
+--- @param clock_module string
+--- @return table
 local function try_require(clock_module)
-   module_installed, lib = pcall(lua_require, clock_module)
+   local module_installed, lib = pcall(lua_require, clock_module)
    assert(module_installed, string.format("Dependency '%s' is required for testing.", clock_module))
    return lib
 end
@@ -20,44 +20,40 @@ local socket = try_require("socket")
 
 local CLOCKS = { "chronos" }
 if posix_time.clock_gettime then
-   table.insert(CLOCKS, "posix.time")
+   CLOCKS[#CLOCKS + 1] = "posix.time"
 end
 
----@param include {string:boolean}
-local function build_filtered_require(include)
-   return function(module_name)
-      for name, should_include in pairs(include) do
-         if not should_include and module_name == name then
-            error(string.format("module '%s' not found", module_name))
-         end
+--- @param clock_module string
+--- @return table
+local function load_luamark(clock_module)
+   package.loaded["luamark"] = nil
+   for i = 1, #CLOCKS do
+      package.loaded[CLOCKS[i]] = nil
+   end
+
+   local blocked = {}
+   for i = 1, #CLOCKS do
+      if CLOCKS[i] ~= clock_module then
+         blocked[CLOCKS[i]] = true
       end
-      return lua_require(module_name)
    end
-end
 
-local load_luamark
-do
-   local INCLUDE_FILTER = {}
-   for _, clock_name in ipairs(CLOCKS) do
-      INCLUDE_FILTER[clock_name] = false
-   end
-   load_luamark = function(clock_module)
-      -- unload modules
-      package.loaded[SRC_PATH] = nil
-      for _, clock_name in ipairs(CLOCKS) do
-         package.loaded[clock_name] = nil
+   local original_require = _G.require
+   _G.require = function(module_name)
+      if blocked[module_name] then
+         error(string.format("module '%s' not found", module_name))
       end
-
-      INCLUDE_FILTER[clock_module] = true
-      _G.require = build_filtered_require(INCLUDE_FILTER)
-      luamark = require(SRC_PATH)
-      INCLUDE_FILTER[clock_module] = false
-      return luamark
+      return original_require(module_name)
    end
+
+   local luamark = require("luamark")
+   _G.require = original_require
+   return luamark
 end
 
-local noop = function() end
+local function noop() end
 
+--- @param stats table
 local function assert_stats_not_nil(stats)
    assert.is_not_nil(stats)
    for _, stat in pairs(stats) do
@@ -93,7 +89,7 @@ for _, clock_name in ipairs(CLOCKS) do
       -- ----------------------------------------------------------------------------
       -- Base tests
       -- ----------------------------------------------------------------------------
-      describe("use clock", function()
+      test("uses correct clock", function()
          assert.are_equal(clock_name, luamark.clock_name)
       end)
 
@@ -198,7 +194,7 @@ for _, clock_name in ipairs(CLOCKS) do
       describe("timeit", function()
          local calls = 0
          local max_sleep_time = SLEEP_TIME * 2
-         local counter = function()
+         local function counter()
             calls = calls + 1
             local sleep_time = calls == 10 and max_sleep_time or SLEEP_TIME
             socket.sleep(sleep_time)
@@ -228,7 +224,7 @@ for _, clock_name in ipairs(CLOCKS) do
       -- ----------------------------------------------------------------------------
       -- memit
       -- ----------------------------------------------------------------------------
-      -- For unkown reasons, memory calls are not deterministic on 5.2 and 5.3
+      -- For unknown reasons, memory calls are not deterministic on 5.2 and 5.3
 
       local is_jit = type(jit) == "table"
       if _VERSION ~= "Lua 5.2" and _VERSION ~= "Lua 5.3" and not is_jit then
@@ -269,11 +265,13 @@ end
 -- ----------------------------------------------------------------------------
 
 describe("error", function()
+   local luamark
+
    setup(function()
-      luamark = require(SRC_PATH)
+      luamark = require("luamark")
    end)
 
-   describe(" ", function()
+   describe("validation", function()
       for name, benchmark in pairs({ timeit = luamark.timeit, memit = luamark.memit }) do
          local bench_suffix = string.format(" (%s)", name)
 
@@ -313,7 +311,7 @@ describe("rank", function()
    local luamark
 
    setup(function()
-      luamark = require(SRC_PATH)
+      luamark = require("luamark")
    end)
 
    test("unique values", function()
@@ -380,7 +378,7 @@ describe("summarize", function()
 
    setup(function()
       _G._TEST = true
-      luamark = require(SRC_PATH)
+      luamark = require("luamark")
    end)
 
    test("empty table error", function()
@@ -408,7 +406,7 @@ describe("format_stat", function()
 
    setup(function()
       _G._TEST = true
-      luamark = require(SRC_PATH)
+      luamark = require("luamark")
    end)
 
    test("converts kilobytes to terabytes", function()
@@ -438,7 +436,7 @@ describe("config", function()
 
    setup(function()
       _G._TEST = true
-      luamark = require(SRC_PATH)
+      luamark = require("luamark")
    end)
 
    test("accepts valid config option", function()
