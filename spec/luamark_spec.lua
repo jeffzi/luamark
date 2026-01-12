@@ -932,4 +932,62 @@ describe("suite", function()
          assert.matches(",100,", output)
       end)
    end)
+
+   describe("integration", function()
+      test("full workflow with multiple operations, implementations, and params", function()
+         local setup_calls = {}
+         local teardown_calls = {}
+
+         local results = luamark.suite({
+            add = {
+               fast = function() end,
+               slow = function()
+                  for i = 1, 100 do
+                     local _ = i -- prevent empty block warning
+                  end
+               end,
+               opts = {
+                  params = { n = { 10, 20 } },
+                  setup = function(p)
+                     setup_calls[#setup_calls + 1] = { op = "add", n = p.n }
+                  end,
+                  teardown = function(p)
+                     teardown_calls[#teardown_calls + 1] = { op = "add", n = p.n }
+                  end,
+                  rounds = 3,
+               },
+            },
+            remove = {
+               fast = function() end,
+               opts = {
+                  params = { n = { 10 } },
+                  rounds = 3,
+               },
+            },
+         })
+
+         -- Check structure
+         assert.is_not_nil(results.add.fast.n[10])
+         assert.is_not_nil(results.add.fast.n[20])
+         assert.is_not_nil(results.add.slow.n[10])
+         assert.is_not_nil(results.add.slow.n[20])
+         assert.is_not_nil(results.remove.fast.n[10])
+
+         -- Check setup/teardown were called
+         assert.is_true(#setup_calls > 0)
+         assert.is_true(#teardown_calls > 0)
+
+         -- Check summarize works
+         local plain = luamark.summarize(results, "plain")
+         assert.matches("add %(n=10%)", plain)
+         assert.matches("add %(n=20%)", plain)
+         assert.matches("remove %(n=10%)", plain)
+
+         local csv = luamark.summarize(results, "csv")
+         assert.matches("operation,implementation,n,", csv)
+         assert.matches("add,fast,10,", csv)
+         assert.matches("add,slow,20,", csv)
+         assert.matches("remove,fast,10,", csv)
+      end)
+   end)
 end)
