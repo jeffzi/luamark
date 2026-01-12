@@ -512,6 +512,16 @@ local function flatten_suite_results(results)
    return rows
 end
 
+---@param value any
+---@return string
+local function escape_csv(value)
+   value = tostring(value)
+   if value:find(",") or value:find('"') then
+      return '"' .. value:gsub('"', '""') .. '"'
+   end
+   return value
+end
+
 ---@param flat table[]
 ---@return string
 local function build_suite_csv(flat)
@@ -553,15 +563,15 @@ local function build_suite_csv(flat)
    end)
 
    for _, row in ipairs(flat) do
-      local cells = { row.operation, row.impl }
+      local cells = { escape_csv(row.operation), escape_csv(row.impl) }
       for _, name in ipairs(param_names) do
-         cells[#cells + 1] = tostring(row.params[name] or "")
+         cells[#cells + 1] = escape_csv(row.params[name] or "")
       end
 
       local formatted = format_row(row.stats)
       for _, h in ipairs(SUMMARIZE_HEADERS) do
          if h ~= "name" then
-            cells[#cells + 1] = formatted[h] or ""
+            cells[#cells + 1] = escape_csv(formatted[h] or "")
          end
       end
 
@@ -578,12 +588,7 @@ local function build_csv(rows)
    for _, row in ipairs(rows) do
       local cells = {}
       for i, header in ipairs(SUMMARIZE_HEADERS) do
-         local value = row[header] or ""
-         -- Escape commas and quotes in values
-         if type(value) == "string" and (value:find(",") or value:find('"')) then
-            value = '"' .. value:gsub('"', '""') .. '"'
-         end
-         cells[i] = tostring(value)
+         cells[i] = escape_csv(row[header] or "")
       end
       lines[#lines + 1] = table.concat(cells, ",")
    end
@@ -1012,6 +1017,40 @@ end
 -- Suite
 -- ----------------------------------------------------------------------------
 
+-- Suite Input Types
+
+---@class SuiteImplConfig Implementation with optional setup/teardown
+---@field fn function The function to benchmark
+---@field setup? fun(params: table) Per-implementation setup (untimed)
+---@field teardown? fun(params: table) Per-implementation teardown (untimed)
+
+---@class SuiteOpts Shared configuration for an operation
+---@field params? table<string, any[]> Parameter names to value arrays (cartesian product)
+---@field setup? fun(params: table) Shared setup (untimed, runs before impl setup)
+---@field teardown? fun(params: table) Shared teardown (untimed, runs after impl teardown)
+---@field rounds? integer Number of benchmark rounds
+---@field max_time? number Maximum time for benchmarking
+
+---@alias SuiteImpl function|SuiteImplConfig Either a bare function or config with fn
+
+---@class SuiteOperation Operation definition with implementations
+---@field opts? SuiteOpts Shared configuration (only reserved key)
+---@field [string] SuiteImpl Implementations (all other keys)
+
+---@alias SuiteInput table<string, SuiteOperation> Map of operation names to operation definitions
+
+-- Suite Result Types
+
+---@alias SuiteParamResult table<any, Stats|SuiteParamResult> Nested params leading to Stats
+
+---@alias SuiteImplResult table<string, SuiteParamResult>|{_: Stats} Stats keyed by params (or _ for no params)
+
+---@alias SuiteOpResult table<string, SuiteImplResult> Implementation name to param results
+
+---@alias SuiteResult table<string, SuiteOpResult> Operation name to impl results
+
+-- Internal Types
+
 ---@class ParsedImpl
 ---@field fn function
 ---@field setup? function
@@ -1019,9 +1058,9 @@ end
 
 ---@class ParsedOperation
 ---@field [string] ParsedImpl
----@field _opts? { setup?: function, teardown?: function, params?: table, rounds?: integer, max_time?: number }
+---@field _opts? SuiteOpts
 
----@param suite_input table
+---@param suite_input SuiteInput
 ---@return table<string, ParsedOperation>
 local function parse_suite(suite_input)
    assert(suite_input and next(suite_input), "suite input is empty")
@@ -1131,10 +1170,10 @@ local function expand_params(params)
 end
 
 --- Run a suite of benchmarks with implementations and parameters.
----@param suite_input table
+---@param suite_input SuiteInput
 ---@param measure_fn? Measure
 ---@param unit? default_unit
----@return table
+---@return SuiteResult
 local function run_suite(suite_input, measure_fn, unit)
    measure_fn = measure_fn or measure_time
    unit = unit or "s"
@@ -1199,15 +1238,15 @@ local function run_suite(suite_input, measure_fn, unit)
 end
 
 --- Benchmarks a suite for execution time.
----@param suite_input table
----@return table
+---@param suite_input SuiteInput Operations with implementations and optional params
+---@return SuiteResult Nested results: result[operation][impl].param[value] -> Stats
 function luamark.suite(suite_input)
    return run_suite(suite_input, measure_time, "s")
 end
 
 --- Benchmarks a suite for memory usage.
----@param suite_input table
----@return table
+---@param suite_input SuiteInput Operations with implementations and optional params
+---@return SuiteResult Nested results: result[operation][impl].param[value] -> Stats
 function luamark.suite_memit(suite_input)
    return run_suite(suite_input, measure_memory, "kb")
 end
