@@ -127,6 +127,17 @@ end
 -- Utils
 -- ----------------------------------------------------------------------------
 
+---@param tbl table
+---@return string[]
+local function sorted_keys(tbl)
+   local keys = {}
+   for k in pairs(tbl) do
+      keys[#keys + 1] = k
+   end
+   table.sort(keys)
+   return keys
+end
+
 -- Offset above 0.5 to handle floating-point edge cases in rounding
 local half = 0.50000000000008
 
@@ -299,6 +310,8 @@ local function __tostring_stats(stats, unit)
    )
 end
 
+local UNIT_FIELDS = { min = true, max = true, mean = true, stddev = true, median = true }
+
 ---@param stats table
 ---@return table<string, string>
 local function format_row(stats)
@@ -307,13 +320,7 @@ local function format_row(stats)
    for name, value in pairs(stats) do
       if name == "ratio" then
          row[name] = string.format("%.2f", value)
-      elseif
-         name == "min"
-         or name == "max"
-         or name == "mean"
-         or name == "stddev"
-         or name == "median"
-      then
+      elseif UNIT_FIELDS[name] then
          row[name] = format_stat(value, unit)
       else
          row[name] = tostring(value)
@@ -456,12 +463,7 @@ end
 ---@return string
 local function format_params(params)
    local parts = {}
-   local names = {}
-   for name in pairs(params) do
-      names[#names + 1] = name
-   end
-   table.sort(names)
-   for _, name in ipairs(names) do
+   for _, name in ipairs(sorted_keys(params)) do
       parts[#parts + 1] = name .. "=" .. tostring(params[name])
    end
    return table.concat(parts, ", ")
@@ -621,6 +623,34 @@ local function build_table(rows, widths, format)
    return lines
 end
 
+---@param ranked_results {[string]: Stats}
+---@return table[]
+local function format_ranked_rows(ranked_results)
+   local rows = {}
+   for name, stats in pairs(ranked_results) do
+      local row = format_row(stats)
+      row.name = name
+      rows[#rows + 1] = row
+   end
+   table.sort(rows, function(a, b)
+      return tonumber(a.rank) < tonumber(b.rank)
+   end)
+   return rows
+end
+
+---@param rows table[]
+---@return integer[]
+local function calculate_widths(rows)
+   local widths = {}
+   for i, header in ipairs(SUMMARIZE_HEADERS) do
+      widths[i] = #header
+      for _, row in ipairs(rows) do
+         widths[i] = math.max(widths[i], #(row[header] or ""))
+      end
+   end
+   return widths
+end
+
 ---@param results table
 ---@param format string
 ---@return string
@@ -667,15 +697,7 @@ local function summarize_suite(results, format)
       output[#output + 1] = header
 
       local ranked = rank(group.impls, "median")
-      local rows = {}
-      for name, stats in pairs(ranked) do
-         local row = format_row(stats)
-         row.name = name
-         rows[#rows + 1] = row
-      end
-      table.sort(rows, function(a, b)
-         return tonumber(a.rank) < tonumber(b.rank)
-      end)
+      local rows = format_ranked_rows(ranked)
 
       if format == "compact" then
          local chart = build_bar_chart(rows)
@@ -683,13 +705,7 @@ local function summarize_suite(results, format)
             output[#output + 1] = line
          end
       else
-         local widths = {}
-         for i, hdr in ipairs(SUMMARIZE_HEADERS) do
-            widths[i] = #hdr
-            for _, row in ipairs(rows) do
-               widths[i] = math.max(widths[i], #(row[hdr] or ""))
-            end
-         end
+         local widths = calculate_widths(rows)
          local tbl = build_table(rows, widths, format)
          for _, line in ipairs(tbl) do
             output[#output + 1] = line
@@ -725,15 +741,7 @@ function luamark.summarize(benchmark_results, format)
    end
 
    benchmark_results = rank(benchmark_results, "median")
-   local rows = {}
-   for name, stats in pairs(benchmark_results) do
-      local row = format_row(stats)
-      row.name = name
-      rows[#rows + 1] = row
-   end
-   table.sort(rows, function(a, b)
-      return tonumber(a.rank) < tonumber(b.rank)
-   end)
+   local rows = format_ranked_rows(benchmark_results)
 
    if format == "csv" then
       return build_csv(rows)
@@ -743,13 +751,7 @@ function luamark.summarize(benchmark_results, format)
       return table.concat(build_bar_chart(rows), "\n")
    end
 
-   local widths = {}
-   for i, header in ipairs(SUMMARIZE_HEADERS) do
-      widths[i] = #header
-      for _, row in ipairs(rows) do
-         widths[i] = math.max(widths[i], #(row[header] or ""))
-      end
-   end
+   local widths = calculate_widths(rows)
 
    if format == "plain" then
       local other_width = 0
@@ -1105,12 +1107,7 @@ end
 ---@param params table
 ---@param value any
 local function set_nested(tbl, params, value)
-   -- Get sorted param names
-   local names = {}
-   for name in pairs(params) do
-      names[#names + 1] = name
-   end
-   table.sort(names)
+   local names = sorted_keys(params)
 
    if #names == 0 then
       tbl._ = value
@@ -1138,17 +1135,9 @@ local function expand_params(params)
       return { {} }
    end
 
-   -- Get sorted param names
-   local names = {}
-   for name in pairs(params) do
-      names[#names + 1] = name
-   end
-   table.sort(names)
-
-   -- Build cartesian product
    local combos = { {} }
 
-   for _, name in ipairs(names) do
+   for _, name in ipairs(sorted_keys(params)) do
       local values = params[name]
       local new_combos = {}
 
