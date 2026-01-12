@@ -119,6 +119,65 @@ print(mem_stats)
 -- Output: 2.06kB ± 0B per round (533081 rounds)
 ```
 
+### Suite API
+
+Compare multiple implementations across operations and parameter values with untimed setup:
+
+```lua
+local luamark = require("luamark")
+
+-- Compare table operations at different sizes
+local results = luamark.suite({
+   insert = {
+      array = function() data[#data + 1] = 1 end,
+      table_insert = function() table.insert(data, 1) end,
+
+      opts = {
+         params = { n = { 100, 1000, 10000 } },
+         setup = function(p)
+            -- Untimed: create table with initial size
+            data = {}
+            for i = 1, p.n do data[i] = i end
+         end,
+      },
+   },
+   concat = {
+      loop = function()
+         local s = ""
+         for i = 1, #data do s = s .. data[i] end
+      end,
+      table_concat = function() table.concat(data) end,
+
+      opts = {
+         params = { n = { 10, 100, 1000 } },
+         setup = function(p)
+            data = {}
+            for i = 1, p.n do data[i] = tostring(i) end
+         end,
+      },
+   },
+})
+
+-- Display results
+print(luamark.summarize(results, "plain"))
+
+-- Export to CSV
+local csv = luamark.summarize(results, "csv")
+local f = io.open("results.csv", "w")
+f:write(csv)
+f:close()
+
+-- Access individual stats
+local loop_100 = results.concat.loop.n[100]
+print(loop_100.median)  -- median time for loop concat with n=100
+```
+
+Key features:
+
+- **Untimed setup/teardown**: Generate test data without affecting timing
+- **Parameter expansion**: Cartesian product of all parameter values
+- **Nested results**: `results[operation][impl].param[value]` → Stats
+
 ## Technical Details
 
 ### Configuration

@@ -100,13 +100,13 @@ Benchmarks a function for memory usage. The memory usage is represented in kilob
 ## summarize
 
 ```lua
-function luamark.summarize(benchmark_results: { [string]: Stats }, format?: "plain"|"compact"|"markdown")
+function luamark.summarize(benchmark_results: { [string]: Stats }|SuiteResult, format?: "plain"|"compact"|"markdown"|"csv")
   -> string
 ```
 
 Return a string summarizing the results of multiple benchmarks.
 
-@_param_ `benchmark_results` — The benchmark results to summarize, indexed by name.
+@_param_ `benchmark_results` — The benchmark results to summarize (from `timeit`/`memit` or `suite`/`suite_memit`).
 
 @_param_ `format` — The output format (default: "plain")
 
@@ -115,4 +115,85 @@ format:
     | "plain"    -- Table with bar chart
     | "compact"  -- Bar chart only
     | "markdown" -- Markdown table (no bar chart)
+    | "csv"      -- CSV format (suite results only)
 ```
+
+## SuiteOpts
+
+Shared configuration for an operation.
+
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+| params | table<string, any[]>? | Parameter names mapped to arrays of values (cartesian product) |
+| setup | fun(params: table)? | Shared setup function (untimed, runs before impl setup) |
+| teardown | fun(params: table)? | Shared teardown function (untimed, runs after impl teardown) |
+| rounds | integer? | Number of benchmark rounds |
+| max_time | number? | Maximum time for benchmarking |
+
+## SuiteInput
+
+Map of operation names to operation definitions.
+
+```lua
+{
+  [operation_name] = {
+    -- Implementations (all keys except 'opts')
+    impl1 = fn,                                            -- bare function
+    impl2 = { fn = fn, setup = fn?, teardown = fn? },      -- with per-impl config
+
+    -- Shared configuration (only reserved key)
+    opts = SuiteOpts?,
+  },
+}
+```
+
+## SuiteResult
+
+Nested result structure: `result[operation][impl].param[value]` → Stats
+
+```lua
+-- Single parameter
+results["sort"]["quick"].n[1000]  -- → Stats
+
+-- Multiple parameters (sorted alphabetically)
+results["op"]["impl"].m[10].n[100]  -- → Stats
+
+-- No parameters
+results["op"]["impl"]._  -- → Stats
+```
+
+## suite
+
+```lua
+function luamark.suite(suite_input: SuiteInput)
+  -> SuiteResult
+```
+
+Benchmarks a suite for execution time with untimed setup/teardown and parameter expansion.
+
+@_param_ `suite_input` — Operations with implementations and optional params.
+
+@_return_ — Nested results: `result[operation][impl].param[value]` → Stats
+
+### Setup/Teardown Execution Order
+
+For each (operation, implementation, param_combination):
+
+1. `opts.setup(params)` - shared setup (untimed)
+2. `impl.setup(params)` - per-implementation setup (untimed)
+3. **measurement loop** - times only `impl.fn`
+4. `impl.teardown(params)` - per-implementation teardown (untimed)
+5. `opts.teardown(params)` - shared teardown (untimed)
+
+## suite_memit
+
+```lua
+function luamark.suite_memit(suite_input: SuiteInput)
+  -> SuiteResult
+```
+
+Benchmarks a suite for memory usage with untimed setup/teardown and parameter expansion.
+
+@_param_ `suite_input` — Operations with implementations and optional params.
+
+@_return_ — Nested results: `result[operation][impl].param[value]` → Stats
