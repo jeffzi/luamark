@@ -762,4 +762,88 @@ describe("suite", function()
          assert.are.same({}, combos[1])
       end)
    end)
+
+   describe("runner", function()
+      test("runs single operation with single implementation", function()
+         local call_count = 0
+         local results = luamark.suite({
+            add = {
+               impl_a = function()
+                  call_count = call_count + 1
+               end,
+               opts = { rounds = 1 },
+            },
+         })
+
+         assert.is_true(call_count > 0)
+         assert.is_not_nil(results.add)
+         assert.is_not_nil(results.add.impl_a)
+         assert.is_not_nil(results.add.impl_a._)
+         assert.is_not_nil(results.add.impl_a._.median)
+      end)
+
+      test("runs with parameters", function()
+         local seen_params = {}
+         local results = luamark.suite({
+            add = {
+               impl_a = {
+                  fn = function() end,
+                  setup = function(p)
+                     seen_params[p.n] = true
+                  end,
+               },
+               opts = {
+                  params = { n = { 100, 200 } },
+                  rounds = 1,
+               },
+            },
+         })
+
+         assert.is_true(seen_params[100])
+         assert.is_true(seen_params[200])
+         assert.is_not_nil(results.add.impl_a.n[100])
+         assert.is_not_nil(results.add.impl_a.n[200])
+      end)
+
+      test("runs shared setup before impl setup", function()
+         local order = {}
+         local results = luamark.suite({
+            add = {
+               impl_a = {
+                  fn = function() end,
+                  setup = function()
+                     order[#order + 1] = "impl"
+                  end,
+               },
+               opts = {
+                  setup = function()
+                     order[#order + 1] = "shared"
+                  end,
+                  rounds = 1,
+               },
+            },
+         })
+
+         assert.are.equal("shared", order[1])
+         assert.are.equal("impl", order[2])
+      end)
+
+      test("setup receives params", function()
+         local received_n
+         local results = luamark.suite({
+            add = {
+               impl_a = function() end,
+               opts = {
+                  setup = function(p)
+                     received_n = p.n
+                  end,
+                  params = { n = { 42 } },
+                  rounds = 1,
+               },
+            },
+         })
+
+         assert.are.equal(42, received_n)
+      end)
+   end)
 end)

@@ -794,7 +794,7 @@ end
 
 ---@class ParsedOperation
 ---@field [string] ParsedImpl
----@field _opts? { setup?: function, teardown?: function, params?: table }
+---@field _opts? { setup?: function, teardown?: function, params?: table, rounds?: integer, max_time?: number }
 
 ---@param suite_input table
 ---@return table<string, ParsedOperation>
@@ -888,6 +888,81 @@ local function expand_params(params)
    end
 
    return combos
+end
+
+--- Run a suite of benchmarks with implementations and parameters.
+---@param suite_input table
+---@param measure_fn? Measure
+---@param unit? default_unit
+---@return table
+local function run_suite(suite_input, measure_fn, unit)
+   measure_fn = measure_fn or measure_time
+   unit = unit or "s"
+
+   local parsed = parse_suite(suite_input)
+   local results = {}
+
+   for op_name, op in pairs(parsed) do
+      results[op_name] = {}
+      local opts = op._opts or {}
+      local params_list = expand_params(opts.params)
+
+      for impl_name, impl in pairs(op) do
+         if impl_name ~= "_opts" then
+            results[op_name][impl_name] = {}
+
+            for _, params in ipairs(params_list) do
+               -- Build combined setup: shared then impl
+               local combined_setup
+               if opts.setup or impl.setup then
+                  combined_setup = function()
+                     if opts.setup then
+                        opts.setup(params)
+                     end
+                     if impl.setup then
+                        impl.setup(params)
+                     end
+                  end
+               end
+
+               -- Build combined teardown: impl then shared
+               local combined_teardown
+               if impl.teardown or opts.teardown then
+                  combined_teardown = function()
+                     if impl.teardown then
+                        impl.teardown(params)
+                     end
+                     if opts.teardown then
+                        opts.teardown(params)
+                     end
+                  end
+               end
+
+               local stats = single_benchmark(
+                  impl.fn,
+                  measure_fn,
+                  measure_fn == measure_time,
+                  unit,
+                  opts.rounds,
+                  opts.max_time,
+                  combined_setup,
+                  combined_teardown
+               )
+
+               set_nested(results[op_name][impl_name], params, stats)
+            end
+         end
+      end
+   end
+
+   return results
+end
+
+--- Benchmarks a suite for execution time.
+---@param suite_input table
+---@return table
+function luamark.suite(suite_input)
+   return run_suite(suite_input, measure_time, "s")
 end
 
 ---@package
