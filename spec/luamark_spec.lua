@@ -416,7 +416,7 @@ describe("summarize", function()
    test("invalid format error", function()
       assert.has.error(function()
          luamark.summarize({ test = { median = 1 } }, "invalid")
-      end, "format must be 'plain', 'compact', or 'markdown'")
+      end, "format must be 'plain', 'compact', 'markdown', or 'csv'")
    end)
 
    test("plain format includes table and bar chart", function()
@@ -550,6 +550,37 @@ describe("summarize", function()
          assert.matches("fast", output)
          assert.matches("slow", output)
       end
+   end)
+
+   test("csv format outputs comma-separated values", function()
+      local results = {
+         fast = {
+            median = 0.001,
+            mean = 0.001,
+            min = 0.0009,
+            max = 0.0011,
+            stddev = 0.00005,
+            rounds = 10,
+            unit = "s",
+         },
+         slow = {
+            median = 0.003,
+            mean = 0.003,
+            min = 0.0028,
+            max = 0.0032,
+            stddev = 0.0001,
+            rounds = 10,
+            unit = "s",
+         },
+      }
+      luamark._internal.rank(results, "median")
+      local output = luamark.summarize(results, "csv")
+
+      -- Check header
+      assert.matches("name,rank,ratio,median,mean,min,max,stddev,rounds", output)
+      -- Check data rows exist
+      assert.matches("fast,1,", output)
+      assert.matches("slow,2,", output)
    end)
 end)
 
