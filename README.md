@@ -13,12 +13,13 @@ validating code improvements, LuaMark offers the tools you need with minimal set
 
 ## Features
 
-- **Time and Memory Measurement**: High-precision execution timing and memory allocation
-  tracking
-  - Time: Increase timing precision with [Chronos][chronos], [LuaPosix][luaposix], or
-    [LuaSocket][luasocket]
-  - Memory: Enhance allocation tracking accuracy using [AllocSpy][allocspy]
-- **Comprehensive Statistics**: Get detailed performance insights including minimum,
+- **Single File, Zero Dependencies**: Drop [luamark.lua](src/luamark.lua) into your
+  project and start benchmarking. No external dependencies required.
+- **Enhanced Precision** (optional): Automatically leverages installed libraries for
+  better accuracy when available:
+  - Time: [Chronos][chronos], [LuaPosix][luaposix], or [LuaSocket][luasocket]
+  - Memory: [AllocSpy][allocspy]
+- **Comprehensive Statistics**: Detailed performance insights including minimum,
   maximum, mean, median, and standard deviation
 - **Zero Configuration**: Start benchmarking immediately with sensible defaults while
   retaining full configurability
@@ -31,8 +32,13 @@ validating code improvements, LuaMark offers the tools you need with minimal set
 ## Requirements
 
 - Lua 5.1, 5.2, 5.3, 5.4, LuaJIT 2.1 or Luau
-- Optional: [chronos], [luaposix], or [luasocket] for enhanced timing precision
-- Optional: [AllocSpy][allocspy] for enhanced memory tracking
+
+No other dependencies. LuaMark works out of the box with `os.clock` and Lua's built-in
+memory tracking. Install optional libraries for enhanced precision:
+
+- [chronos], [luaposix], or [luasocket] for timing (see
+  [Clock Precision Hierarchy](#clock-precision-hierarchy))
+- [AllocSpy][allocspy] for memory tracking
 
 ## Installation
 
