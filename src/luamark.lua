@@ -438,6 +438,25 @@ local SUMMARIZE_HEADERS = {
 }
 
 ---@param rows table[]
+---@return string
+local function build_csv(rows)
+   local lines = { table.concat(SUMMARIZE_HEADERS, ",") }
+   for _, row in ipairs(rows) do
+      local cells = {}
+      for i, header in ipairs(SUMMARIZE_HEADERS) do
+         local value = row[header] or ""
+         -- Escape commas and quotes in values
+         if type(value) == "string" and (value:find(",") or value:find('"')) then
+            value = '"' .. value:gsub('"', '""') .. '"'
+         end
+         cells[i] = tostring(value)
+      end
+      lines[#lines + 1] = table.concat(cells, ",")
+   end
+   return table.concat(lines, "\n")
+end
+
+---@param rows table[]
 ---@param widths integer[]
 ---@param format "plain"|"compact"|"markdown"
 ---@return string[]
@@ -465,14 +484,14 @@ end
 
 ---Return a string summarizing the results of multiple benchmarks.
 ---@param benchmark_results {[string]: Stats} The benchmark results to summarize, indexed by name.
----@param format? "plain"|"compact"|"markdown" The output format
+---@param format? "plain"|"compact"|"markdown"|"csv" The output format
 ---@return string
 function luamark.summarize(benchmark_results, format)
    assert(benchmark_results and next(benchmark_results), "'benchmark_results' is nil or empty.")
    format = format or "plain"
    assert(
-      format == "plain" or format == "compact" or format == "markdown",
-      "format must be 'plain', 'compact', or 'markdown'"
+      format == "plain" or format == "compact" or format == "markdown" or format == "csv",
+      "format must be 'plain', 'compact', 'markdown', or 'csv'"
    )
 
    benchmark_results = rank(benchmark_results, "median")
@@ -485,6 +504,10 @@ function luamark.summarize(benchmark_results, format)
    table.sort(rows, function(a, b)
       return tonumber(a.rank) < tonumber(b.rank)
    end)
+
+   if format == "csv" then
+      return build_csv(rows)
+   end
 
    if format == "compact" then
       return table.concat(build_bar_chart(rows), "\n")
@@ -513,6 +536,7 @@ function luamark.summarize(benchmark_results, format)
       end
    end
 
+   ---@cast format "plain"|"compact"|"markdown"
    local lines = build_table(rows, widths, format)
 
    if format == "plain" then
