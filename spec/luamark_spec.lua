@@ -861,6 +861,34 @@ describe("suite", function()
       assert.are.equal("kb", results.alloc.impl_a._.unit)
    end)
 
+   describe("validation", function()
+      test("rejects empty suite", function()
+         assert.has.error(function()
+            luamark.suite({})
+         end, "suite input is empty")
+      end)
+
+      test("rejects operation with no implementations", function()
+         assert.has.error(function()
+            luamark.suite({
+               add = {
+                  opts = { rounds = 1 },
+               },
+            })
+         end, "operation 'add' has no implementations")
+      end)
+
+      test("rejects invalid implementation", function()
+         assert.has.error(function()
+            luamark.suite({
+               add = {
+                  impl_a = "not a function",
+               },
+            })
+         end, "implementation 'impl_a' must be a function or table with 'fn'")
+      end)
+   end)
+
    describe("summarize", function()
       test("summarizes suite results grouped by operation and params", function()
          local results = luamark.suite({

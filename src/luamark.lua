@@ -1024,24 +1024,39 @@ end
 ---@param suite_input table
 ---@return table<string, ParsedOperation>
 local function parse_suite(suite_input)
+   assert(suite_input and next(suite_input), "suite input is empty")
+
    local parsed = {}
 
    for op_name, op_config in pairs(suite_input) do
+      assert(type(op_config) == "table", "operation '" .. op_name .. "' must be a table")
+
       parsed[op_name] = { _opts = {} }
+      local has_impl = false
 
       for key, value in pairs(op_config) do
          if key == "opts" then
             parsed[op_name]._opts = value
          elseif type(value) == "function" then
             parsed[op_name][key] = { fn = value }
+            has_impl = true
          elseif type(value) == "table" and value.fn then
+            assert(
+               type(value.fn) == "function",
+               "implementation '" .. key .. "' must be a function or table with 'fn'"
+            )
             parsed[op_name][key] = {
                fn = value.fn,
                setup = value.setup,
                teardown = value.teardown,
             }
+            has_impl = true
+         elseif type(value) ~= "table" then
+            error("implementation '" .. key .. "' must be a function or table with 'fn'")
          end
       end
+
+      assert(has_impl, "operation '" .. op_name .. "' has no implementations")
    end
 
    return parsed
