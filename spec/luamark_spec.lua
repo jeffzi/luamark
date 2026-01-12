@@ -847,6 +847,20 @@ describe("suite", function()
       end)
    end)
 
+   test("suite_memit measures memory", function()
+      local results = luamark.suite_memit({
+         alloc = {
+            impl_a = function()
+               local t = { 1, 2, 3 }
+            end,
+            opts = { rounds = 5 },
+         },
+      })
+
+      assert.is_not_nil(results.alloc.impl_a._.unit)
+      assert.are.equal("kb", results.alloc.impl_a._.unit)
+   end)
+
    describe("summarize", function()
       test("summarizes suite results grouped by operation and params", function()
          local results = luamark.suite({

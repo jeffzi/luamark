@@ -1190,6 +1190,13 @@ function luamark.suite(suite_input)
    return run_suite(suite_input, measure_time, "s")
 end
 
+--- Benchmarks a suite for memory usage.
+---@param suite_input table
+---@return table
+function luamark.suite_memit(suite_input)
+   return run_suite(suite_input, measure_memory, "kb")
+end
+
 ---@package
 luamark._internal = {
    CALIBRATION_PRECISION = CALIBRATION_PRECISION,
