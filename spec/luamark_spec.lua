@@ -647,3 +647,66 @@ describe("config", function()
       end, "Invalid config option: foo")
    end)
 end)
+
+-- ----------------------------------------------------------------------------
+-- Test Suite
+-- ----------------------------------------------------------------------------
+
+describe("suite", function()
+   local luamark
+
+   setup(function()
+      luamark = require("luamark")
+   end)
+
+   describe("input parsing", function()
+      test("parses simple function implementations", function()
+         local parsed = luamark._internal.parse_suite({
+            add = {
+               impl_a = function() end,
+               impl_b = function() end,
+            },
+         })
+
+         assert.is_not_nil(parsed.add)
+         assert.is_not_nil(parsed.add.impl_a)
+         assert.is_not_nil(parsed.add.impl_b)
+         assert.is_function(parsed.add.impl_a.fn)
+         assert.is_function(parsed.add.impl_b.fn)
+      end)
+
+      test("parses implementation with config", function()
+         local setup_fn = function() end
+         local teardown_fn = function() end
+         local run_fn = function() end
+
+         local parsed = luamark._internal.parse_suite({
+            add = {
+               impl_a = { fn = run_fn, setup = setup_fn, teardown = teardown_fn },
+            },
+         })
+
+         assert.are.equal(run_fn, parsed.add.impl_a.fn)
+         assert.are.equal(setup_fn, parsed.add.impl_a.setup)
+         assert.are.equal(teardown_fn, parsed.add.impl_a.teardown)
+      end)
+
+      test("parses opts separately from implementations", function()
+         local global_setup = function() end
+
+         local parsed = luamark._internal.parse_suite({
+            add = {
+               impl_a = function() end,
+               opts = {
+                  setup = global_setup,
+                  params = { n = { 100, 1000 } },
+               },
+            },
+         })
+
+         assert.is_nil(parsed.add.opts) -- opts is not an implementation
+         assert.are.equal(global_setup, parsed.add._opts.setup)
+         assert.are.same({ n = { 100, 1000 } }, parsed.add._opts.params)
+      end)
+   end)
+end)

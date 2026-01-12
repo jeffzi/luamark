@@ -783,6 +783,45 @@ function luamark.memit(fn, opts)
    )
 end
 
+-- ----------------------------------------------------------------------------
+-- Suite
+-- ----------------------------------------------------------------------------
+
+---@class ParsedImpl
+---@field fn function
+---@field setup? function
+---@field teardown? function
+
+---@class ParsedOperation
+---@field [string] ParsedImpl
+---@field _opts? { setup?: function, teardown?: function, params?: table }
+
+---@param suite_input table
+---@return table<string, ParsedOperation>
+local function parse_suite(suite_input)
+   local parsed = {}
+
+   for op_name, op_config in pairs(suite_input) do
+      parsed[op_name] = { _opts = {} }
+
+      for key, value in pairs(op_config) do
+         if key == "opts" then
+            parsed[op_name]._opts = value
+         elseif type(value) == "function" then
+            parsed[op_name][key] = { fn = value }
+         elseif type(value) == "table" and value.fn then
+            parsed[op_name][key] = {
+               fn = value.fn,
+               setup = value.setup,
+               teardown = value.teardown,
+            }
+         end
+      end
+   end
+
+   return parsed
+end
+
 ---@package
 luamark._internal = {
    CALIBRATION_PRECISION = CALIBRATION_PRECISION,
@@ -792,6 +831,7 @@ luamark._internal = {
    get_min_clocktime = get_min_clocktime,
    measure_memory = measure_memory,
    measure_time = measure_time,
+   parse_suite = parse_suite,
    rank = rank,
 }
 
