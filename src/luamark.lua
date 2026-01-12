@@ -822,11 +822,50 @@ local function parse_suite(suite_input)
    return parsed
 end
 
+---@param params table<string, any[]>
+---@return table[] # Array of param combinations
+local function expand_params(params)
+   if not params or not next(params) then
+      return { {} }
+   end
+
+   -- Get sorted param names
+   local names = {}
+   for name in pairs(params) do
+      names[#names + 1] = name
+   end
+   table.sort(names)
+
+   -- Build cartesian product
+   local combos = { {} }
+
+   for _, name in ipairs(names) do
+      local values = params[name]
+      local new_combos = {}
+
+      for _, combo in ipairs(combos) do
+         for _, value in ipairs(values) do
+            local new_combo = {}
+            for k, v in pairs(combo) do
+               new_combo[k] = v
+            end
+            new_combo[name] = value
+            new_combos[#new_combos + 1] = new_combo
+         end
+      end
+
+      combos = new_combos
+   end
+
+   return combos
+end
+
 ---@package
 luamark._internal = {
    CALIBRATION_PRECISION = CALIBRATION_PRECISION,
    DEFAULT_TERM_WIDTH = DEFAULT_TERM_WIDTH,
    calculate_stats = calculate_stats,
+   expand_params = expand_params,
    format_stat = format_stat,
    get_min_clocktime = get_min_clocktime,
    measure_memory = measure_memory,

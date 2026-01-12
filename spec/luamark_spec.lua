@@ -709,4 +709,34 @@ describe("suite", function()
          assert.are.same({ n = { 100, 1000 } }, parsed.add._opts.params)
       end)
    end)
+
+   describe("parameter expansion", function()
+      test("expands single parameter", function()
+         local combos = luamark._internal.expand_params({ n = { 100, 1000 } })
+
+         assert.are.equal(2, #combos)
+         assert.are.same({ n = 100 }, combos[1])
+         assert.are.same({ n = 1000 }, combos[2])
+      end)
+
+      test("expands multiple parameters as cartesian product", function()
+         local combos = luamark._internal.expand_params({
+            n = { 10, 20 },
+            m = { 1, 2 },
+         })
+
+         assert.are.equal(4, #combos)
+         -- Sorted by param name (m before n), then value
+         assert.are.same({ m = 1, n = 10 }, combos[1])
+         assert.are.same({ m = 1, n = 20 }, combos[2])
+         assert.are.same({ m = 2, n = 10 }, combos[3])
+         assert.are.same({ m = 2, n = 20 }, combos[4])
+      end)
+
+      test("returns single empty combo when no params", function()
+         local combos = luamark._internal.expand_params({})
+         assert.are.equal(1, #combos)
+         assert.are.same({}, combos[1])
+      end)
+   end)
 end)
