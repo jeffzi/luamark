@@ -822,6 +822,36 @@ local function parse_suite(suite_input)
    return parsed
 end
 
+---@param tbl table
+---@param params table
+---@param value any
+local function set_nested(tbl, params, value)
+   -- Get sorted param names
+   local names = {}
+   for name in pairs(params) do
+      names[#names + 1] = name
+   end
+   table.sort(names)
+
+   if #names == 0 then
+      tbl._ = value
+      return
+   end
+
+   local current = tbl
+   for i, name in ipairs(names) do
+      local param_value = params[name]
+      if i == #names then
+         current[name] = current[name] or {}
+         current[name][param_value] = value
+      else
+         current[name] = current[name] or {}
+         current[name][param_value] = current[name][param_value] or {}
+         current = current[name][param_value]
+      end
+   end
+end
+
 ---@param params table<string, any[]>
 ---@return table[] # Array of param combinations
 local function expand_params(params)
@@ -872,6 +902,7 @@ luamark._internal = {
    measure_time = measure_time,
    parse_suite = parse_suite,
    rank = rank,
+   set_nested = set_nested,
 }
 
 return setmetatable(luamark, {

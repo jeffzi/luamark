@@ -710,6 +710,29 @@ describe("suite", function()
       end)
    end)
 
+   describe("param key", function()
+      test("builds nested structure for single param", function()
+         local result = {}
+         luamark._internal.set_nested(result, { n = 100 }, "stats")
+
+         assert.are.equal("stats", result.n[100])
+      end)
+
+      test("builds nested structure for multiple params", function()
+         local result = {}
+         luamark._internal.set_nested(result, { m = 10, n = 100 }, "stats")
+
+         assert.are.equal("stats", result.m[10].n[100])
+      end)
+
+      test("handles empty params", function()
+         local result = {}
+         luamark._internal.set_nested(result, {}, "stats")
+
+         assert.are.equal("stats", result._)
+      end)
+   end)
+
    describe("parameter expansion", function()
       test("expands single parameter", function()
          local combos = luamark._internal.expand_params({ n = { 100, 1000 } })
