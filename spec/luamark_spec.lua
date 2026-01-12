@@ -846,4 +846,48 @@ describe("suite", function()
          assert.are.equal(42, received_n)
       end)
    end)
+
+   describe("summarize", function()
+      test("summarizes suite results grouped by operation and params", function()
+         local results = luamark.suite({
+            add = {
+               fast = function() end,
+               slow = function()
+                  for i = 1, 1000 do
+                     local _ = i -- prevent empty block warning
+                  end
+               end,
+               opts = {
+                  params = { n = { 100 } },
+                  rounds = 5,
+               },
+            },
+         })
+
+         local output = luamark.summarize(results, "plain")
+
+         assert.matches("add %(n=100%)", output)
+         assert.matches("fast", output)
+         assert.matches("slow", output)
+      end)
+
+      test("csv includes operation and params columns", function()
+         local results = luamark.suite({
+            add = {
+               impl_a = function() end,
+               opts = {
+                  params = { n = { 100 } },
+                  rounds = 1,
+               },
+            },
+         })
+
+         local output = luamark.summarize(results, "csv")
+
+         assert.matches("operation,", output)
+         assert.matches("n,", output)
+         assert.matches("add,", output)
+         assert.matches(",100,", output)
+      end)
+   end)
 end)

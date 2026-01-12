@@ -437,6 +437,140 @@ local SUMMARIZE_HEADERS = {
    "rounds",
 }
 
+---@param results table
+---@return boolean
+local function is_suite_result(results)
+   -- Suite results have operation -> impl -> params -> stats structure
+   -- Check if first level contains tables with nested stats (only check first element)
+   local _, value = next(results)
+   if type(value) == "table" and not value.median then
+      local _, impl_value = next(value)
+      if type(impl_value) == "table" and not impl_value.median then
+         return true
+      end
+   end
+   return false
+end
+
+---@param params table
+---@return string
+local function format_params(params)
+   local parts = {}
+   local names = {}
+   for name in pairs(params) do
+      names[#names + 1] = name
+   end
+   table.sort(names)
+   for _, name in ipairs(names) do
+      parts[#parts + 1] = name .. "=" .. tostring(params[name])
+   end
+   return table.concat(parts, ", ")
+end
+
+---@param results table
+---@return table[] # Flattened rows with operation, impl, params, stats
+local function flatten_suite_results(results)
+   local rows = {}
+
+   for op_name, op in pairs(results) do
+      for impl_name, impl in pairs(op) do
+         -- Traverse nested param structure to find stats
+         local function traverse(tbl, params)
+            if tbl.median then
+               -- Found stats
+               rows[#rows + 1] = {
+                  operation = op_name,
+                  impl = impl_name,
+                  params = params,
+                  stats = tbl,
+               }
+               return
+            end
+
+            for key, value in pairs(tbl) do
+               if key == "_" then
+                  -- Empty params case
+                  traverse(value, {})
+               elseif type(value) == "table" then
+                  -- This is a param name
+                  for param_value, nested in pairs(value) do
+                     local new_params = {}
+                     for k, v in pairs(params) do
+                        new_params[k] = v
+                     end
+                     new_params[key] = param_value
+                     traverse(nested, new_params)
+                  end
+               end
+            end
+         end
+
+         traverse(impl, {})
+      end
+   end
+
+   return rows
+end
+
+---@param flat table[]
+---@return string
+local function build_suite_csv(flat)
+   -- Collect all param names
+   local param_names = {}
+   local param_set = {}
+   for _, row in ipairs(flat) do
+      for name in pairs(row.params) do
+         if not param_set[name] then
+            param_set[name] = true
+            param_names[#param_names + 1] = name
+         end
+      end
+   end
+   table.sort(param_names)
+
+   -- Build header
+   local headers = { "operation", "implementation" }
+   for _, name in ipairs(param_names) do
+      headers[#headers + 1] = name
+   end
+   for _, h in ipairs(SUMMARIZE_HEADERS) do
+      if h ~= "name" then
+         headers[#headers + 1] = h
+      end
+   end
+
+   local lines = { table.concat(headers, ",") }
+
+   -- Sort flat results
+   table.sort(flat, function(a, b)
+      if a.operation ~= b.operation then
+         return a.operation < b.operation
+      end
+      if a.impl ~= b.impl then
+         return a.impl < b.impl
+      end
+      return format_params(a.params) < format_params(b.params)
+   end)
+
+   for _, row in ipairs(flat) do
+      local cells = { row.operation, row.impl }
+      for _, name in ipairs(param_names) do
+         cells[#cells + 1] = tostring(row.params[name] or "")
+      end
+
+      local formatted = format_row(row.stats)
+      for _, h in ipairs(SUMMARIZE_HEADERS) do
+         if h ~= "name" then
+            cells[#cells + 1] = formatted[h] or ""
+         end
+      end
+
+      lines[#lines + 1] = table.concat(cells, ",")
+   end
+
+   return table.concat(lines, "\n")
+end
+
 ---@param rows table[]
 ---@return string
 local function build_csv(rows)
@@ -482,6 +616,93 @@ local function build_table(rows, widths, format)
    return lines
 end
 
+---@param results table
+---@param format string
+---@return string
+local function summarize_suite(results, format)
+   local flat = flatten_suite_results(results)
+
+   -- Group by operation + params
+   local groups = {}
+   for _, row in ipairs(flat) do
+      local key = row.operation .. "|" .. format_params(row.params)
+      if not groups[key] then
+         groups[key] = {
+            operation = row.operation,
+            params = row.params,
+            impls = {},
+         }
+      end
+      groups[key].impls[row.impl] = row.stats
+   end
+
+   -- Sort groups
+   local sorted_groups = {}
+   for _, group in pairs(groups) do
+      sorted_groups[#sorted_groups + 1] = group
+   end
+   table.sort(sorted_groups, function(a, b)
+      if a.operation ~= b.operation then
+         return a.operation < b.operation
+      end
+      return format_params(a.params) < format_params(b.params)
+   end)
+
+   if format == "csv" then
+      return build_suite_csv(flat)
+   end
+
+   -- Build output for each group
+   local output = {}
+   for _, group in ipairs(sorted_groups) do
+      local header = group.operation
+      if next(group.params) then
+         header = header .. " (" .. format_params(group.params) .. ")"
+      end
+      output[#output + 1] = header
+
+      local ranked = rank(group.impls, "median")
+      local rows = {}
+      for name, stats in pairs(ranked) do
+         local row = format_row(stats)
+         row.name = name
+         rows[#rows + 1] = row
+      end
+      table.sort(rows, function(a, b)
+         return tonumber(a.rank) < tonumber(b.rank)
+      end)
+
+      if format == "compact" then
+         local chart = build_bar_chart(rows)
+         for _, line in ipairs(chart) do
+            output[#output + 1] = line
+         end
+      else
+         local widths = {}
+         for i, hdr in ipairs(SUMMARIZE_HEADERS) do
+            widths[i] = #hdr
+            for _, row in ipairs(rows) do
+               widths[i] = math.max(widths[i], #(row[hdr] or ""))
+            end
+         end
+         local tbl = build_table(rows, widths, format)
+         for _, line in ipairs(tbl) do
+            output[#output + 1] = line
+         end
+         if format == "plain" then
+            output[#output + 1] = ""
+            local chart = build_bar_chart(rows)
+            for _, line in ipairs(chart) do
+               output[#output + 1] = line
+            end
+         end
+      end
+      output[#output + 1] = ""
+   end
+
+   return table.concat(output, "\n")
+end
+
 ---Return a string summarizing the results of multiple benchmarks.
 ---@param benchmark_results {[string]: Stats} The benchmark results to summarize, indexed by name.
 ---@param format? "plain"|"compact"|"markdown"|"csv" The output format
@@ -493,6 +714,10 @@ function luamark.summarize(benchmark_results, format)
       format == "plain" or format == "compact" or format == "markdown" or format == "csv",
       "format must be 'plain', 'compact', 'markdown', or 'csv'"
    )
+
+   if is_suite_result(benchmark_results) then
+      return summarize_suite(benchmark_results, format)
+   end
 
    benchmark_results = rank(benchmark_results, "median")
    local rows = {}
@@ -971,8 +1196,10 @@ luamark._internal = {
    DEFAULT_TERM_WIDTH = DEFAULT_TERM_WIDTH,
    calculate_stats = calculate_stats,
    expand_params = expand_params,
+   flatten_suite_results = flatten_suite_results,
    format_stat = format_stat,
    get_min_clocktime = get_min_clocktime,
+   is_suite_result = is_suite_result,
    measure_memory = measure_memory,
    measure_time = measure_time,
    parse_suite = parse_suite,
