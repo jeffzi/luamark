@@ -1,0 +1,9 @@
+modules = {
+   ["luamark"] = "src/luamark.lua",
+   ["luamark.*"] = "src",
+}
+
+reporter = "html"
+reportfile = "luacov_report.html"
+
+runreport = true
