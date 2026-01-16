@@ -414,6 +414,28 @@ describe("rank", function()
    end)
 end)
 
+describe("tostring on stats", function()
+   local luamark
+
+   setup(function()
+      luamark = require("luamark")
+   end)
+
+   test("single function stats tostring includes mean and stddev", function()
+      local stats = luamark.timeit(function() end, { rounds = 3 })
+      local str = tostring(stats)
+      assert.matches("per round", str)
+      assert.matches("%d+ rounds", str)
+   end)
+
+   test("multiple function stats tostring produces summary", function()
+      local stats = luamark.timeit({ a = function() end, b = function() end }, { rounds = 3 })
+      local str = tostring(stats)
+      assert.matches("Name", str)
+      assert.matches("Rank", str)
+   end)
+end)
+
 describe("summarize", function()
    local luamark
 
