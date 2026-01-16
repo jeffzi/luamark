@@ -54,12 +54,33 @@ end
 
 local function noop() end
 
---- @param stats table
+---@param stats table
 local function assert_stats_not_nil(stats)
    assert.is_not_nil(stats)
    for _, stat in pairs(stats) do
       assert.is_not_nil(stat)
    end
+end
+
+--- Factory function to create stats tables with sensible defaults.
+---@param overrides? table Optional fields to override defaults
+---@return table
+local function make_stats(overrides)
+   local stats = {
+      median = 100,
+      mean = 100,
+      min = 90,
+      max = 110,
+      stddev = 5,
+      rounds = 10,
+      unit = "s",
+   }
+   if overrides then
+      for k, v in pairs(overrides) do
+         stats[k] = v
+      end
+   end
+   return stats
 end
 
 -- ----------------------------------------------------------------------------
@@ -421,24 +442,8 @@ describe("summarize", function()
 
    test("plain format includes table and bar chart", function()
       local results = {
-         fast = {
-            median = 100,
-            mean = 100,
-            min = 90,
-            max = 110,
-            stddev = 5,
-            rounds = 10,
-            unit = "s",
-         },
-         slow = {
-            median = 300,
-            mean = 300,
-            min = 280,
-            max = 320,
-            stddev = 10,
-            rounds = 10,
-            unit = "s",
-         },
+         fast = make_stats(),
+         slow = make_stats({ median = 300, mean = 300, min = 280, max = 320, stddev = 10 }),
       }
       luamark._internal.rank(results, "median")
       local output = luamark.summarize(results, "plain")
@@ -449,24 +454,8 @@ describe("summarize", function()
 
    test("compact format shows only bar chart", function()
       local results = {
-         fast = {
-            median = 100,
-            mean = 100,
-            min = 90,
-            max = 110,
-            stddev = 5,
-            rounds = 10,
-            unit = "s",
-         },
-         slow = {
-            median = 300,
-            mean = 300,
-            min = 280,
-            max = 320,
-            stddev = 10,
-            rounds = 10,
-            unit = "s",
-         },
+         fast = make_stats(),
+         slow = make_stats({ median = 300, mean = 300, min = 280, max = 320, stddev = 10 }),
       }
       luamark._internal.rank(results, "median")
       local output = luamark.summarize(results, "compact")
@@ -477,24 +466,8 @@ describe("summarize", function()
 
    test("plain and compact truncate long names to fit terminal width", function()
       local results = {
-         very_long_function_name_that_should_definitely_be_truncated_to_fit_the_terminal_width_limit = {
-            median = 100,
-            mean = 100,
-            min = 90,
-            max = 110,
-            stddev = 5,
-            rounds = 10,
-            unit = "s",
-         },
-         short = {
-            median = 500,
-            mean = 500,
-            min = 450,
-            max = 550,
-            stddev = 10,
-            rounds = 10,
-            unit = "s",
-         },
+         very_long_function_name_that_should_definitely_be_truncated_to_fit_the_terminal_width_limit = make_stats(),
+         short = make_stats({ median = 500, mean = 500, min = 450, max = 550, stddev = 10 }),
       }
       luamark._internal.rank(results, "median")
 
@@ -523,24 +496,8 @@ describe("summarize", function()
 
    test("short names are not truncated", function()
       local results = {
-         fast = {
-            median = 100,
-            mean = 100,
-            min = 90,
-            max = 110,
-            stddev = 5,
-            rounds = 10,
-            unit = "s",
-         },
-         slow = {
-            median = 500,
-            mean = 500,
-            min = 450,
-            max = 550,
-            stddev = 10,
-            rounds = 10,
-            unit = "s",
-         },
+         fast = make_stats(),
+         slow = make_stats({ median = 500, mean = 500, min = 450, max = 550, stddev = 10 }),
       }
       luamark._internal.rank(results, "median")
 
@@ -554,24 +511,20 @@ describe("summarize", function()
 
    test("csv format outputs comma-separated values", function()
       local results = {
-         fast = {
+         fast = make_stats({
             median = 0.001,
             mean = 0.001,
             min = 0.0009,
             max = 0.0011,
             stddev = 0.00005,
-            rounds = 10,
-            unit = "s",
-         },
-         slow = {
+         }),
+         slow = make_stats({
             median = 0.003,
             mean = 0.003,
             min = 0.0028,
             max = 0.0032,
             stddev = 0.0001,
-            rounds = 10,
-            unit = "s",
-         },
+         }),
       }
       luamark._internal.rank(results, "median")
       local output = luamark.summarize(results, "csv")
