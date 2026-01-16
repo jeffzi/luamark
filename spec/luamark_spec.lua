@@ -167,8 +167,8 @@ for _, clock_name in ipairs(CLOCKS) do
                   { rounds = 1, setup = setup_counter, teardown = teardown_counter }
                )
                assert.is_true(setup_calls > 0)
-               assert.is_equals(setup_calls, teardown_calls)
-               assert.is_equals(teardown_calls, counter_calls)
+               assert.are_equal(setup_calls, teardown_calls)
+               assert.are_equal(teardown_calls, counter_calls)
             end)
          end
       end)
@@ -326,9 +326,9 @@ describe("rank", function()
          ["test2"] = { mean = 10 },
       }
       rank(data, "mean")
-      assert.are.equal(1, data["test1"].rank)
-      assert.are.equal(2, data["test2"].rank)
-      assert.are.equal(1, data["test1"].ratio)
+      assert.are_equal(1, data["test1"].rank)
+      assert.are_equal(2, data["test2"].rank)
+      assert.are_equal(1, data["test1"].ratio)
       -- Should not be inf or nan
       assert.is_true(data["test2"].ratio < math.huge)
       assert.is_false(data["test2"].ratio ~= data["test2"].ratio) -- NaN check
@@ -356,13 +356,13 @@ describe("rank", function()
       }
       rank(data, "mean")
 
-      assert.are.equal(1, data["test1"].rank)
-      assert.are.equal(1, data["test2"].rank)
-      assert.are.equal(1, data["test3"].rank)
+      assert.are_equal(1, data["test1"].rank)
+      assert.are_equal(1, data["test2"].rank)
+      assert.are_equal(1, data["test3"].rank)
 
-      assert.are.equal(1.0, data["test1"].ratio)
-      assert.are.equal(1.0, data["test2"].ratio)
-      assert.are.equal(1.0, data["test3"].ratio)
+      assert.are_equal(1.0, data["test1"].ratio)
+      assert.are_equal(1.0, data["test2"].ratio)
+      assert.are_equal(1.0, data["test3"].ratio)
    end)
 
    test("ranks by specified key", function()
@@ -594,8 +594,8 @@ describe("calculate_stats", function()
    test("handles negative values", function()
       local samples = { -5, -3, -1 }
       local stats = calculate_stats(samples)
-      assert.are.equal(-1, stats.max)
-      assert.are.equal(-5, stats.min)
+      assert.are_equal(-1, stats.max)
+      assert.are_equal(-5, stats.min)
    end)
 end)
 
@@ -608,19 +608,19 @@ describe("format_stat", function()
 
    test("converts kilobytes to terabytes", function()
       local tb, gb = 1024 ^ 3, 1024 ^ 2
-      assert.are.equal("1.5TB", format_stat(tb + 512 * gb, "kb"))
+      assert.are_equal("1.5TB", format_stat(tb + 512 * gb, "kb"))
    end)
 
    test("converts seconds to nanoseconds", function()
-      assert.are.equal("5ns", format_stat(5 / 1e9, "s"))
+      assert.are_equal("5ns", format_stat(5 / 1e9, "s"))
    end)
 
    test("rounds sub-nanosecond to zero", function()
-      assert.are.equal("0ns", format_stat(0.5 / 1e9, "s"))
+      assert.are_equal("0ns", format_stat(0.5 / 1e9, "s"))
    end)
 
    test("rounds sub-byte to zero", function()
-      assert.are.equal("0B", format_stat(0.25 / 1024, "kb"))
+      assert.are_equal("0B", format_stat(0.25 / 1024, "kb"))
    end)
 end)
 
@@ -686,9 +686,9 @@ describe("suite", function()
             },
          })
 
-         assert.are.equal(run_fn, parsed.add.impl_a.fn)
-         assert.are.equal(setup_fn, parsed.add.impl_a.setup)
-         assert.are.equal(teardown_fn, parsed.add.impl_a.teardown)
+         assert.are_equal(run_fn, parsed.add.impl_a.fn)
+         assert.are_equal(setup_fn, parsed.add.impl_a.setup)
+         assert.are_equal(teardown_fn, parsed.add.impl_a.teardown)
       end)
 
       test("parses opts separately from benchmarks", function()
@@ -705,7 +705,7 @@ describe("suite", function()
          })
 
          assert.is_nil(parsed.add.opts.fn) -- opts is not a benchmark (no fn field)
-         assert.are.equal(global_setup, parsed.add.opts.setup)
+         assert.are_equal(global_setup, parsed.add.opts.setup)
          assert.are.same({ n = { 100, 1000 } }, parsed.add.opts.params)
       end)
    end)
@@ -715,14 +715,14 @@ describe("suite", function()
          local result = {}
          luamark._internal.set_nested(result, { n = 100 }, "stats")
 
-         assert.are.equal("stats", result.n[100])
+         assert.are_equal("stats", result.n[100])
       end)
 
       test("builds nested structure for multiple params", function()
          local result = {}
          luamark._internal.set_nested(result, { m = 10, n = 100 }, "stats")
 
-         assert.are.equal("stats", result.m[10].n[100])
+         assert.are_equal("stats", result.m[10].n[100])
       end)
 
       test("returns false for empty params", function()
@@ -738,7 +738,7 @@ describe("suite", function()
       test("expands single parameter", function()
          local combos = luamark._internal.expand_params({ n = { 100, 1000 } })
 
-         assert.are.equal(2, #combos)
+         assert.are_equal(2, #combos)
          assert.are.same({ n = 100 }, combos[1])
          assert.are.same({ n = 1000 }, combos[2])
       end)
@@ -749,7 +749,7 @@ describe("suite", function()
             m = { 1, 2 },
          })
 
-         assert.are.equal(4, #combos)
+         assert.are_equal(4, #combos)
          -- Sorted by param name (m before n), then value
          assert.are.same({ m = 1, n = 10 }, combos[1])
          assert.are.same({ m = 1, n = 20 }, combos[2])
@@ -759,7 +759,7 @@ describe("suite", function()
 
       test("returns single empty combo when no params", function()
          local combos = luamark._internal.expand_params({})
-         assert.are.equal(1, #combos)
+         assert.are_equal(1, #combos)
          assert.are.same({}, combos[1])
       end)
    end)
@@ -824,8 +824,8 @@ describe("suite", function()
             },
          })
 
-         assert.are.equal("shared", order[1])
-         assert.are.equal("impl", order[2])
+         assert.are_equal("shared", order[1])
+         assert.are_equal("impl", order[2])
       end)
 
       test("setup receives params", function()
@@ -843,7 +843,7 @@ describe("suite", function()
             },
          })
 
-         assert.are.equal(42, received_n)
+         assert.are_equal(42, received_n)
       end)
    end)
 
@@ -858,7 +858,7 @@ describe("suite", function()
       })
 
       assert.is_not_nil(results.alloc.impl_a.unit)
-      assert.are.equal("kb", results.alloc.impl_a.unit)
+      assert.are_equal("kb", results.alloc.impl_a.unit)
    end)
 
    describe("validation", function()
