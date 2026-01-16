@@ -274,7 +274,10 @@ local function rank(benchmark_results, key)
    local ranks = {}
    for benchmark_name, stats in pairs(benchmark_results) do
       local value = stats[key]
-      assert(value ~= nil, "stats['" .. key .. "'] is nil for benchmark '" .. benchmark_name .. "'")
+      assert(
+         value ~= nil,
+         string.format("stats['%s'] is nil for benchmark '%s'", key, benchmark_name)
+      )
       table.insert(ranks, { name = benchmark_name, value = value })
    end
 
@@ -1125,7 +1128,7 @@ local function parse_suite(spec)
    local parsed = {}
 
    for group_name, group_config in pairs(spec) do
-      assert(type(group_config) == "table", "group '" .. group_name .. "' must be a table")
+      assert(type(group_config) == "table", string.format("group '%s' must be a table", group_name))
 
       parsed[group_name] = { opts = {} }
       local has_benchmark = false
@@ -1143,7 +1146,7 @@ local function parse_suite(spec)
          elseif type(value) == "table" then
             assert(
                type(value.fn) == "function",
-               "benchmark '" .. key .. "' must be a function or table with 'fn' function"
+               string.format("benchmark '%s' must be a function or table with 'fn' function", key)
             )
             parsed[group_name][key] = {
                fn = value.fn,
@@ -1152,11 +1155,11 @@ local function parse_suite(spec)
             }
             has_benchmark = true
          else
-            error("benchmark '" .. key .. "' must be a function or table with 'fn'")
+            error(string.format("benchmark '%s' must be a function or table with 'fn'", key))
          end
       end
 
-      assert(has_benchmark, "group '" .. group_name .. "' has no benchmarks")
+      assert(has_benchmark, string.format("group '%s' has no benchmarks", group_name))
    end
 
    return parsed
