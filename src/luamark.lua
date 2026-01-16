@@ -25,6 +25,9 @@ local MEMORY_PRECISION = 4
 
 local BYTES_TO_KB = 1024
 
+-- Maximum attempts to calibrate iterations before giving up.
+local MAX_CALIBRATION_ATTEMPTS = 10
+
 local config = {
    max_iterations = 1e6,
    min_rounds = 100,
@@ -908,9 +911,8 @@ local measure_memory = build_measure(measure_memory_once, MEMORY_PRECISION)
 local function calibrate_iterations(fn, setup, teardown)
    local min_time = get_min_clocktime() * CALIBRATION_PRECISION
    local iterations = 1
-   local max_attempts = 20
 
-   for _ = 1, max_attempts do
+   for _ = 1, MAX_CALIBRATION_ATTEMPTS do
       local round_total = measure_time(fn, iterations, setup, teardown)
       if round_total >= min_time then
          break
