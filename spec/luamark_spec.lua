@@ -232,10 +232,11 @@ for _, clock_name in ipairs(CLOCKS) do
       -- ----------------------------------------------------------------------------
       -- memit
       -- ----------------------------------------------------------------------------
-      -- For unknown reasons, memory calls are not deterministic on 5.2 and 5.3
+      -- Memory calls are not deterministic on 5.2, 5.3, LuaJIT, or when LuaCov is active
 
       local is_jit = type(jit) == "table"
-      if _VERSION ~= "Lua 5.2" and _VERSION ~= "Lua 5.3" and not is_jit then
+      local has_luacov = package.loaded["luacov"] ~= nil or package.loaded["luacov.runner"] ~= nil
+      if _VERSION ~= "Lua 5.2" and _VERSION ~= "Lua 5.3" and not is_jit and not has_luacov then
          describe("memit", function()
             local funcs = {
                noop = noop,
