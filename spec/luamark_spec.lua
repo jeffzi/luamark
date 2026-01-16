@@ -500,7 +500,7 @@ describe("summarize", function()
 
       local max_width = luamark._internal.DEFAULT_TERM_WIDTH
       for _, fmt in ipairs({ "plain", "compact" }) do
-         local output = luamark.summarize(results, fmt)
+         local output = luamark.summarize(results, fmt, max_width)
          for line in output:gmatch("[^\n]+") do
             local display_width = 0
             for _ in line:gmatch("[%z\1-\127\194-\244][\128-\191]*") do

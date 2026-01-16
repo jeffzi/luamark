@@ -775,8 +775,9 @@ end
 
 ---@param results SuiteResult
 ---@param format "plain"|"compact"|"markdown"|"csv"
+---@param max_width? integer
 ---@return string
-local function summarize_suite(results, format)
+local function summarize_suite(results, format, max_width)
    local flat = flatten_suite_results(results)
 
    if format == "csv" then
@@ -784,6 +785,7 @@ local function summarize_suite(results, format)
    end
    ---@cast format "plain"|"compact"|"markdown"
 
+   max_width = max_width or get_term_width()
    local output = {}
    local benchmark_groups = collect_benchmark_groups(flat)
    for i = 1, #benchmark_groups do
@@ -798,13 +800,13 @@ local function summarize_suite(results, format)
       local rows = format_ranked_rows(ranked)
 
       if format == "compact" then
-         array_extend(output, build_bar_chart(rows))
+         array_extend(output, build_bar_chart(rows, max_width))
       else
          local widths = calculate_widths(rows)
          array_extend(output, build_table(rows, widths, format))
          if format == "plain" then
             output[#output + 1] = ""
-            array_extend(output, build_bar_chart(rows))
+            array_extend(output, build_bar_chart(rows, max_width))
          end
       end
       output[#output + 1] = ""
@@ -815,8 +817,9 @@ end
 
 ---@param results {[string]: Stats}
 ---@param format "plain"|"compact"|"markdown"|"csv"
+---@param max_width? integer
 ---@return string
-local function summarize_benchmark(results, format)
+local function summarize_benchmark(results, format, max_width)
    results = rank(results, "median")
    local rows = format_ranked_rows(results)
 
@@ -824,8 +827,10 @@ local function summarize_benchmark(results, format)
       return build_csv(rows)
    end
 
+   max_width = max_width or get_term_width()
+
    if format == "compact" then
-      return table.concat(build_bar_chart(rows), "\n")
+      return table.concat(build_bar_chart(rows, max_width), "\n")
    end
 
    local widths = calculate_widths(rows)
@@ -836,7 +841,7 @@ local function summarize_benchmark(results, format)
          other_width = other_width + widths[i]
       end
       local max_name =
-         math.max(NAME_MIN_WIDTH, get_term_width() - other_width - (#SUMMARIZE_HEADERS - 1) * 2)
+         math.max(NAME_MIN_WIDTH, max_width - other_width - (#SUMMARIZE_HEADERS - 1) * 2)
       if widths[1] > max_name then
          widths[1] = max_name
          for i = 1, #rows do
@@ -1337,8 +1342,9 @@ end
 ---Return a string summarizing benchmark results.
 ---@param results {[string]: Stats}|SuiteResult Benchmark or suite results
 ---@param format? "plain"|"compact"|"markdown"|"csv" The output format
+---@param max_width? integer Maximum output width (default: terminal width)
 ---@return string
-function luamark.summarize(results, format)
+function luamark.summarize(results, format, max_width)
    assert(results and next(results), "'results' is nil or empty.")
    format = format or "plain"
    assert(
@@ -1347,10 +1353,10 @@ function luamark.summarize(results, format)
    )
 
    if is_suite_result(results) then
-      return summarize_suite(results, format)
+      return summarize_suite(results, format, max_width)
    end
    ---@cast results {[string]: Stats}
-   return summarize_benchmark(results, format)
+   return summarize_benchmark(results, format, max_width)
 end
 
 --- Benchmarks a function for execution time. The time is represented in seconds.

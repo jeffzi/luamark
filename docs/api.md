@@ -111,15 +111,20 @@ Benchmarks a function for memory usage. The memory usage is represented in kilob
 ### summarize
 
 ```lua
-function luamark.summarize(benchmark_results: { [string]: Stats }|SuiteResult, format?: "plain"|"compact"|"markdown"|"csv")
-  -> string
+function luamark.summarize(
+   results: { [string]: Stats }|SuiteResult,
+   format?: "plain"|"compact"|"markdown"|"csv",
+   max_width?: integer
+) -> string
 ```
 
 Return a string summarizing the results of multiple benchmarks.
 
-@_param_ `benchmark_results` — The benchmark results to summarize (from `timeit`/`memit` or `suite_timeit`/`suite_memit`).
+@_param_ `results` — The benchmark results (from `timeit`/`memit` or `suite_timeit`/`suite_memit`).
 
 @_param_ `format` — The output format (default: "plain")
+
+@_param_ `max_width` — Maximum output width in characters (default: terminal width or 100)
 
 ```lua
 format:
