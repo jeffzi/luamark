@@ -64,5 +64,5 @@ jobs:
       - name: Run tests with coverage
         run: busted -c
 
-      - name: Print coverage report
-        run: luacov && cat luacov.report.out
+      - name: Print coverage summary
+        run: luacov && tail -7 luacov.report.out
