@@ -14,6 +14,7 @@ local function try_require(clock_module)
    return lib
 end
 
+local allocspy = try_require("allocspy")
 local chronos = try_require("chronos")
 local posix_time = try_require("posix.time")
 local socket = try_require("socket")

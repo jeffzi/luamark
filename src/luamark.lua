@@ -104,8 +104,7 @@ end
 local measure_memory_once
 do
    local is_allocspy_installed, allocspy = pcall(require, "allocspy")
-   -- allocspy returns bytes; collectgarbage("count") returns KiB (binary, 1024 bytes).
-   -- Convert allocspy to KiB for consistent output.
+   -- Normalize allocspy (bytes) to match collectgarbage (KiB)
    if is_allocspy_installed then
       measure_memory_once = function(fn)
          collectgarbage("collect")
@@ -520,7 +519,7 @@ local SUMMARIZE_HEADERS = {
    "rounds",
 }
 
----@param results table
+---@param results {[string]: Stats}|SuiteResult
 ---@return boolean
 local function is_suite_result(results)
    -- Suite results have group -> benchmark -> params -> stats structure
@@ -1437,6 +1436,7 @@ luamark._internal = {
    set_nested = set_nested,
 }
 
+-- Allow direct config access (luamark.max_rounds) with validation on write
 return setmetatable(luamark, {
    __index = config,
    __newindex = function(_, k, v)
