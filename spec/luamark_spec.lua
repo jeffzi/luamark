@@ -403,14 +403,14 @@ describe("summarize", function()
    test("empty table error", function()
       assert.has.error(function()
          luamark.summarize({})
-      end, "'benchmark_results' is nil or empty.")
+      end, "'results' is nil or empty.")
    end)
 
    test("nil error", function()
       assert.has.error(function()
          ---@diagnostic disable-next-line: param-type-mismatch
          luamark.summarize(nil)
-      end, "'benchmark_results' is nil or empty.")
+      end, "'results' is nil or empty.")
    end)
 
    test("invalid format error", function()
@@ -660,7 +660,7 @@ describe("suite", function()
    end)
 
    describe("input parsing", function()
-      test("parses simple function implementations", function()
+      test("parses simple function benchmarks", function()
          local parsed = luamark._internal.parse_suite({
             add = {
                impl_a = function() end,
@@ -675,7 +675,7 @@ describe("suite", function()
          assert.is_function(parsed.add.impl_b.fn)
       end)
 
-      test("parses implementation with config", function()
+      test("parses benchmark with config", function()
          local setup_fn = function() end
          local teardown_fn = function() end
          local run_fn = function() end
@@ -691,7 +691,7 @@ describe("suite", function()
          assert.are.equal(teardown_fn, parsed.add.impl_a.teardown)
       end)
 
-      test("parses opts separately from implementations", function()
+      test("parses opts separately from benchmarks", function()
          local global_setup = function() end
 
          local parsed = luamark._internal.parse_suite({
@@ -704,9 +704,9 @@ describe("suite", function()
             },
          })
 
-         assert.is_nil(parsed.add.opts) -- opts is not an implementation
-         assert.are.equal(global_setup, parsed.add._opts.setup)
-         assert.are.same({ n = { 100, 1000 } }, parsed.add._opts.params)
+         assert.is_nil(parsed.add.opts.fn) -- opts is not a benchmark (no fn field)
+         assert.are.equal(global_setup, parsed.add.opts.setup)
+         assert.are.same({ n = { 100, 1000 } }, parsed.add.opts.params)
       end)
    end)
 
@@ -725,11 +725,12 @@ describe("suite", function()
          assert.are.equal("stats", result.m[10].n[100])
       end)
 
-      test("handles empty params", function()
+      test("returns false for empty params", function()
          local result = {}
-         luamark._internal.set_nested(result, {}, "stats")
+         local stored = luamark._internal.set_nested(result, {}, "stats")
 
-         assert.are.equal("stats", result._)
+         assert.is_false(stored)
+         assert.is_nil(next(result))
       end)
    end)
 
@@ -764,9 +765,9 @@ describe("suite", function()
    end)
 
    describe("runner", function()
-      test("runs single operation with single implementation", function()
+      test("runs single group with single benchmark", function()
          local call_count = 0
-         local results = luamark.suite({
+         local results = luamark.suite_timeit({
             add = {
                impl_a = function()
                   call_count = call_count + 1
@@ -778,13 +779,12 @@ describe("suite", function()
          assert.is_true(call_count > 0)
          assert.is_not_nil(results.add)
          assert.is_not_nil(results.add.impl_a)
-         assert.is_not_nil(results.add.impl_a._)
-         assert.is_not_nil(results.add.impl_a._.median)
+         assert.is_not_nil(results.add.impl_a.median)
       end)
 
       test("runs with parameters", function()
          local seen_params = {}
-         local results = luamark.suite({
+         local results = luamark.suite_timeit({
             add = {
                impl_a = {
                   fn = function() end,
@@ -805,9 +805,9 @@ describe("suite", function()
          assert.is_not_nil(results.add.impl_a.n[200])
       end)
 
-      test("runs shared setup before impl setup", function()
+      test("runs shared setup before benchmark setup", function()
          local order = {}
-         local results = luamark.suite({
+         local results = luamark.suite_timeit({
             add = {
                impl_a = {
                   fn = function() end,
@@ -830,7 +830,7 @@ describe("suite", function()
 
       test("setup receives params", function()
          local received_n
-         local results = luamark.suite({
+         local results = luamark.suite_timeit({
             add = {
                impl_a = function() end,
                opts = {
@@ -857,41 +857,41 @@ describe("suite", function()
          },
       })
 
-      assert.is_not_nil(results.alloc.impl_a._.unit)
-      assert.are.equal("kb", results.alloc.impl_a._.unit)
+      assert.is_not_nil(results.alloc.impl_a.unit)
+      assert.are.equal("kb", results.alloc.impl_a.unit)
    end)
 
    describe("validation", function()
       test("rejects empty suite", function()
          assert.has.error(function()
-            luamark.suite({})
-         end, "suite input is empty")
+            luamark.suite_timeit({})
+         end, "spec is empty")
       end)
 
-      test("rejects operation with no implementations", function()
+      test("rejects group with no benchmarks", function()
          assert.has.error(function()
-            luamark.suite({
+            luamark.suite_timeit({
                add = {
                   opts = { rounds = 1 },
                },
             })
-         end, "operation 'add' has no implementations")
+         end, "group 'add' has no benchmarks")
       end)
 
-      test("rejects invalid implementation", function()
+      test("rejects invalid benchmark", function()
          assert.has.error(function()
-            luamark.suite({
+            luamark.suite_timeit({
                add = {
                   impl_a = "not a function",
                },
             })
-         end, "implementation 'impl_a' must be a function or table with 'fn'")
+         end, "benchmark 'impl_a' must be a function or table with 'fn'")
       end)
    end)
 
    describe("summarize", function()
-      test("summarizes suite results grouped by operation and params", function()
-         local results = luamark.suite({
+      test("summarizes suite results grouped by group and params", function()
+         local results = luamark.suite_timeit({
             add = {
                fast = function() end,
                slow = function()
@@ -913,8 +913,8 @@ describe("suite", function()
          assert.matches("slow", output)
       end)
 
-      test("csv includes operation and params columns", function()
-         local results = luamark.suite({
+      test("csv includes group, benchmark and params columns", function()
+         local results = luamark.suite_timeit({
             add = {
                impl_a = function() end,
                opts = {
@@ -926,7 +926,7 @@ describe("suite", function()
 
          local output = luamark.summarize(results, "csv")
 
-         assert.matches("operation,", output)
+         assert.matches("group,benchmark,", output)
          assert.matches("n,", output)
          assert.matches("add,", output)
          assert.matches(",100,", output)
@@ -934,11 +934,11 @@ describe("suite", function()
    end)
 
    describe("integration", function()
-      test("full workflow with multiple operations, implementations, and params", function()
+      test("full workflow with multiple groups, benchmarks, and params", function()
          local setup_calls = {}
          local teardown_calls = {}
 
-         local results = luamark.suite({
+         local results = luamark.suite_timeit({
             add = {
                fast = function() end,
                slow = function()
@@ -949,10 +949,10 @@ describe("suite", function()
                opts = {
                   params = { n = { 10, 20 } },
                   setup = function(p)
-                     setup_calls[#setup_calls + 1] = { op = "add", n = p.n }
+                     setup_calls[#setup_calls + 1] = { benchmark = "add", n = p.n }
                   end,
                   teardown = function(p)
-                     teardown_calls[#teardown_calls + 1] = { op = "add", n = p.n }
+                     teardown_calls[#teardown_calls + 1] = { benchmark = "add", n = p.n }
                   end,
                   rounds = 3,
                },
@@ -984,7 +984,7 @@ describe("suite", function()
          assert.matches("remove %(n=10%)", plain)
 
          local csv = luamark.summarize(results, "csv")
-         assert.matches("operation,implementation,n,", csv)
+         assert.matches("group,benchmark,n,", csv)
          assert.matches("add,fast,10,", csv)
          assert.matches("add,slow,20,", csv)
          assert.matches("remove,fast,10,", csv)

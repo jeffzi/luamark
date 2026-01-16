@@ -1,17 +1,29 @@
--- luamark - A lightweight, portable micro-benchmarking library.
--- Copyright (c) 2025 Jean-Francois Zinque. MIT License.
+--- luamark - A lightweight, portable micro-benchmarking library for Lua.
+--- Provides `timeit` and `memit` functions for measuring execution time and memory usage,
+--- with automatic calibration, statistical analysis, and multiple output formats.
+---@module "luamark"
+-- Copyright (c) 2026 Jean-Francois Zinque. MIT License.
 
 ---@class luamark
 local luamark = {
-   _VERSION = "0.9.0",
+   _VERSION = "0.9.1",
 }
 
 -- ----------------------------------------------------------------------------
 -- Config
 -- ----------------------------------------------------------------------------
 
+-- Minimum benchmark duration in seconds before calibration stops.
 local MIN_TIME = 1
+
+-- Multiplier for clock precision to determine minimum measurable time.
+-- Higher values require longer runs but produce more stable measurements.
 local CALIBRATION_PRECISION = 5
+
+-- Precision for memory measurements (decimal places in KB).
+local MEMORY_PRECISION = 4
+
+local BYTES_TO_KB = 1024
 
 local config = {
    max_iterations = 1e6,
@@ -20,11 +32,14 @@ local config = {
    warmups = 1,
 }
 
---------------------------------------------------------------------------
+-- ----------------------------------------------------------------------------
 -- Time & Memory measurement functions
---------------------------------------------------------------------------------
+-- ----------------------------------------------------------------------------
 
-local clock, clock_precision
+---@type fun(): number
+local clock
+---@type integer
+local clock_precision
 
 ---@return integer time The minimum measurable time difference based on clock precision
 local function get_min_clocktime()
@@ -43,26 +58,27 @@ local CLOCKS = {
          error("posix.time.clock_gettime is not supported on this OS.")
       end
       local NANO_TO_SEC = 1e-9
-      clock = function()
+      return function()
          local time_spec = clock_gettime(CLOCK_MONOTONIC)
          return time_spec.tv_sec + time_spec.tv_nsec * NANO_TO_SEC
-      end
-      return clock, 9
+      end,
+         9
    end,
    socket = function(socket)
       return socket.gettime, 4
    end,
 }
 
-for _, name in ipairs(CLOCK_PRIORITIES) do
+for i = 1, #CLOCK_PRIORITIES do
+   local name = CLOCK_PRIORITIES[i]
    local is_installed, module = pcall(require, name)
-   local ok
    if is_installed then
+      local ok
       ok, clock, clock_precision = pcall(CLOCKS[name], module)
-   end
-   if ok then
-      luamark.clock_name = name
-      break
+      if ok then
+         luamark.clock_name = name
+         break
+      end
    end
 end
 
@@ -85,12 +101,14 @@ end
 local measure_memory_once
 do
    local is_allocspy_installed, allocspy = pcall(require, "allocspy")
+   -- allocspy returns bytes; collectgarbage("count") returns KiB (binary, 1024 bytes).
+   -- Convert allocspy to KiB for consistent output.
    if is_allocspy_installed then
       measure_memory_once = function(fn)
          collectgarbage("collect")
          allocspy.enable()
          fn()
-         return allocspy.disable() / 1000
+         return allocspy.disable() / BYTES_TO_KB
       end
    else
       measure_memory_once = function(fn)
@@ -110,8 +128,8 @@ do
    local ok, system = pcall(require, "system")
    if ok and system.termsize then
       get_term_width = function()
-         local rows, cols = system.termsize()
-         if rows and cols then
+         local _, cols = system.termsize()
+         if type(cols) == "number" then
             return cols
          end
          return DEFAULT_TERM_WIDTH
@@ -127,31 +145,47 @@ end
 -- Utils
 -- ----------------------------------------------------------------------------
 
----@param tbl table
----@return string[]
+---@generic K, V
+---@param tbl table<K, V>
+---@return K[]
 local function sorted_keys(tbl)
    local keys = {}
-   for k in pairs(tbl) do
-      keys[#keys + 1] = k
+   for key in pairs(tbl) do
+      keys[#keys + 1] = key
    end
    table.sort(keys)
    return keys
 end
 
--- Offset above 0.5 to handle floating-point edge cases in rounding
+---@generic K, V
+---@param tbl table<K, V>
+---@return table<K, V>
+local function shallow_copy(tbl)
+   local copy = {}
+   for key, value in pairs(tbl) do
+      copy[key] = value
+   end
+   return copy
+end
+
+---@param target any[]
+---@param source any[]
+local function array_extend(target, source)
+   for i = 1, #source do
+      target[#target + 1] = source[i]
+   end
+end
+
+-- Offset above 0.5 to handle floating-point edge cases in rounding.
 local half = 0.50000000000008
 
----@param num number
+---@param num number Non-negative number to round.
 ---@param precision number
 ---@return number
 local function math_round(num, precision)
+   assert(num >= 0, "math_round expects a non-negative number")
    local mul = 10 ^ (precision or 0)
-   local rounded
-   if num > 0 then
-      rounded = math.floor(num * mul + half) / mul
-   else
-      rounded = math.ceil(num * mul - half) / mul
-   end
+   local rounded = math.floor(num * mul + half) / mul
    return math.max(rounded, 10 ^ -(precision or 0))
 end
 
@@ -159,7 +193,7 @@ end
 -- Statistics
 -- ----------------------------------------------------------------------------
 
----@class Stats
+---@class BaseStats
 ---@field count integer Number of samples collected.
 ---@field mean number Arithmetic mean of samples.
 ---@field median number Median value of samples.
@@ -168,6 +202,8 @@ end
 ---@field stddev number Standard deviation of samples.
 ---@field total number Sum of all samples.
 ---@field samples number[] Raw samples (sorted).
+
+---@class Stats : BaseStats
 ---@field rounds integer Number of benchmark rounds executed.
 ---@field iterations integer Number of iterations per round.
 ---@field warmups integer Number of warmup rounds.
@@ -176,60 +212,70 @@ end
 ---@field rank? integer Rank when comparing multiple benchmarks.
 ---@field ratio? number Ratio relative to fastest benchmark.
 
+--- WARNING: Sorts samples array in place.
 ---@param samples number[]
----@return table
+---@return BaseStats
 local function calculate_stats(samples)
-   local stats = {}
-
-   stats.count = #samples
+   assert(#samples > 0, "samples cannot be empty")
 
    table.sort(samples)
-   local mid = math.floor(#samples / 2)
-   if math.fmod(#samples, 2) == 0 then
-      stats.median = (samples[mid] + samples[mid + 1]) / 2
+
+   local count = #samples
+   local mid = math.floor(count / 2)
+   local median
+   if math.fmod(count, 2) == 0 then
+      median = (samples[mid] + samples[mid + 1]) / 2
    else
-      stats.median = samples[mid + 1]
+      median = samples[mid + 1]
    end
 
-   stats.total = 0
+   local total = 0
    local min, max = math.huge, -math.huge
-   for i = 1, stats.count do
+   for i = 1, count do
       local sample = samples[i]
-      stats.total = stats.total + sample
+      total = total + sample
       min = math.min(sample, min)
       max = math.max(sample, max)
    end
 
-   stats.min = min
-   stats.max = max
-   stats.mean = stats.total / stats.count
+   local mean = total / count
 
    local variance = 0
-   if stats.count > 1 then
+   if count > 1 then
       local sum_of_squares = 0
-      for i = 1, stats.count do
-         local d = samples[i] - stats.mean
+      for i = 1, count do
+         local d = samples[i] - mean
          sum_of_squares = sum_of_squares + d * d
       end
-      variance = sum_of_squares / (stats.count - 1)
+      variance = sum_of_squares / (count - 1)
    end
-   stats.stddev = math.sqrt(variance)
-   stats.samples = samples
+
+   local stats = {
+      count = count,
+      mean = mean,
+      median = median,
+      min = min,
+      max = max,
+      stddev = math.sqrt(variance),
+      total = total,
+      samples = samples,
+   }
 
    return stats
 end
 
---- Rank benchmark results (`timeit` or `memit`) by specified `key` and adds a 'rank' and 'ratio' key to each.
---- The smallest attribute value gets the rank 1 and ratio 1.0, other ratios are relative to it.
----@param benchmark_results {[string]: Stats} The benchmark results to rank, indexed by name.
----@param key string The stats to rank by.
+--- Rank results by `key`, adding 'rank' and 'ratio' fields (smallest = rank 1, ratio 1.0).
+---@param benchmark_results {[string]: Stats}
+---@param key string Field to rank by (e.g., "median", "mean").
 ---@return {[string]: Stats}
 local function rank(benchmark_results, key)
    assert(benchmark_results and next(benchmark_results), "'benchmark_results' is nil or empty.")
 
    local ranks = {}
    for benchmark_name, stats in pairs(benchmark_results) do
-      table.insert(ranks, { name = benchmark_name, value = stats[key] })
+      local value = stats[key]
+      assert(value ~= nil, "stats['" .. key .. "'] is nil for benchmark '" .. benchmark_name .. "'")
+      table.insert(ranks, { name = benchmark_name, value = value })
    end
 
    table.sort(ranks, function(a, b)
@@ -239,13 +285,19 @@ local function rank(benchmark_results, key)
    local rnk = 1
    local prev_value = nil
    local min = ranks[1].value
-   for i, entry in ipairs(ranks) do
+   for i = 1, #ranks do
+      local entry = ranks[i]
       if prev_value ~= entry.value then
          rnk = i
          prev_value = entry.value
       end
-      benchmark_results[entry.name].rank = rnk
-      benchmark_results[entry.name].ratio = (rnk == 1 or min == 0) and 1 or entry.value / min
+      local result = benchmark_results[entry.name]
+      result.rank = rnk
+      if rnk == 1 or min == 0 then
+         result.ratio = 1
+      else
+         result.ratio = entry.value / min
+      end
    end
    return benchmark_results
 end
@@ -286,8 +338,8 @@ end
 local function format_stat(value, base_unit)
    local units = base_unit == "s" and TIME_UNITS or MEMORY_UNITS
 
-   for _, unit in ipairs(units) do
-      local symbol, threshold = unit[1], unit[2]
+   for i = 1, #units do
+      local symbol, threshold = units[i][1], units[i][2]
       if value >= threshold then
          return trim_zeroes(string.format("%.2f", value / threshold)) .. symbol
       end
@@ -312,18 +364,35 @@ end
 
 local UNIT_FIELDS = { min = true, max = true, mean = true, stddev = true, median = true }
 
----@param stats table
+--- Fields to include in formatted output (SUMMARIZE_HEADERS minus 'name', plus 'ratio').
+local FORMAT_ROW_FIELDS = {
+   "rank",
+   "ratio",
+   "median",
+   "mean",
+   "min",
+   "max",
+   "stddev",
+   "rounds",
+}
+
+--- Format stats fields into strings for display.
+---@param stats Stats
 ---@return table<string, string>
 local function format_row(stats)
    local unit = stats.unit
    local row = {}
-   for name, value in pairs(stats) do
-      if name == "ratio" then
-         row[name] = string.format("%.2f", value)
-      elseif UNIT_FIELDS[name] then
-         row[name] = format_stat(value, unit)
-      else
-         row[name] = tostring(value)
+   for i = 1, #FORMAT_ROW_FIELDS do
+      local name = FORMAT_ROW_FIELDS[i]
+      local value = stats[name]
+      if value ~= nil then
+         if name == "ratio" then
+            row[name] = string.format("%.2f", value)
+         elseif UNIT_FIELDS[name] then
+            row[name] = format_stat(value, unit)
+         else
+            row[name] = tostring(value)
+         end
       end
    end
    return row
@@ -393,27 +462,28 @@ local function build_bar_chart(rows, max_width)
    local max_ratio = 1
    local max_suffix_len = 0
    local max_name_len = NAME_MIN_WIDTH
+
    for i = 1, #rows do
       local row = rows[i]
       local ratio = tonumber(row.ratio) or 1
-      if ratio > max_ratio then
-         max_ratio = ratio
-      end
-      local suffix_len = 5 + #row.ratio + #row.median
-      if suffix_len > max_suffix_len then
-         max_suffix_len = suffix_len
-      end
-      if #row.name > max_name_len then
-         max_name_len = #row.name
-      end
+      max_ratio = math.max(max_ratio, ratio)
+      max_suffix_len = math.max(max_suffix_len, 5 + #row.ratio + #row.median)
+      max_name_len = math.max(max_name_len, #row.name)
    end
 
    local available = max_width - 3 - max_suffix_len
+   -- Ensure we have minimum space for both bar and name
+   local min_total = BAR_MIN_WIDTH + NAME_MIN_WIDTH
+   if available < min_total then
+      available = min_total
+   end
    -- Bar gets up to BAR_MAX_WIDTH, leaving at least NAME_MIN_WIDTH for names
    local bar_max = math.min(BAR_MAX_WIDTH, available - NAME_MIN_WIDTH)
    bar_max = math.max(BAR_MIN_WIDTH, bar_max)
    -- Names get remaining space, capped at actual max name length
-   local name_max = math.max(NAME_MIN_WIDTH, math.min(max_name_len, available - bar_max))
+   -- Clamp to ensure bar_max + name_max never exceeds available
+   local name_max = math.min(max_name_len, available - bar_max)
+   name_max = math.max(NAME_MIN_WIDTH, name_max)
 
    local lines = {}
    for i = 1, #rows do
@@ -447,67 +517,73 @@ local SUMMARIZE_HEADERS = {
 ---@param results table
 ---@return boolean
 local function is_suite_result(results)
-   -- Suite results have operation -> impl -> params -> stats structure
+   -- Suite results have group -> benchmark -> params -> stats structure
    -- Check if first level contains tables with nested stats (only check first element)
-   local _, value = next(results)
-   if type(value) == "table" and not value.median then
-      local _, impl_value = next(value)
-      if type(impl_value) == "table" and not impl_value.median then
-         return true
-      end
+   local _, group_value = next(results)
+   if type(group_value) ~= "table" or group_value.median then
+      return false
    end
-   return false
+   local _, bench_value = next(group_value)
+   return type(bench_value) == "table" and not bench_value.median
 end
 
----@param params table
+---@alias ParamValues table<string, any> Map of parameter names to their current values
+
+---@param params ParamValues
 ---@return string
 local function format_params(params)
+   local keys = sorted_keys(params)
    local parts = {}
-   for _, name in ipairs(sorted_keys(params)) do
-      parts[#parts + 1] = name .. "=" .. tostring(params[name])
+   for i = 1, #keys do
+      local name = keys[i]
+      parts[i] = name .. "=" .. tostring(params[name])
    end
    return table.concat(parts, ", ")
 end
 
----@param results table
----@return table[] # Flattened rows with operation, impl, params, stats
+---@class FlattenedRow
+---@field group string Group name
+---@field benchmark string Benchmark name
+---@field params ParamValues Parameter values for this run
+---@field stats Stats Benchmark statistics
+
+---Traverse nested param structure to find stats and collect rows
+---@param tbl table Nested structure to traverse (terminates at Stats with median field)
+---@param params ParamValues Accumulated parameter values
+---@param group_name string
+---@param bench_name string
+---@param rows FlattenedRow[]
+local function traverse_params(tbl, params, group_name, bench_name, rows)
+   if tbl.median then
+      ---@cast tbl Stats
+      rows[#rows + 1] = {
+         group = group_name,
+         benchmark = bench_name,
+         params = params,
+         stats = tbl,
+      }
+      return
+   end
+
+   for key, value in pairs(tbl) do
+      if type(value) == "table" then
+         for param_value, nested in pairs(value) do
+            local new_params = shallow_copy(params)
+            new_params[key] = param_value
+            traverse_params(nested, new_params, group_name, bench_name, rows)
+         end
+      end
+   end
+end
+
+---@param results SuiteResult
+---@return FlattenedRow[]
 local function flatten_suite_results(results)
    local rows = {}
 
-   for op_name, op in pairs(results) do
-      for impl_name, impl in pairs(op) do
-         -- Traverse nested param structure to find stats
-         local function traverse(tbl, params)
-            if tbl.median then
-               -- Found stats
-               rows[#rows + 1] = {
-                  operation = op_name,
-                  impl = impl_name,
-                  params = params,
-                  stats = tbl,
-               }
-               return
-            end
-
-            for key, value in pairs(tbl) do
-               if key == "_" then
-                  -- Empty params case
-                  traverse(value, {})
-               elseif type(value) == "table" then
-                  -- This is a param name
-                  for param_value, nested in pairs(value) do
-                     local new_params = {}
-                     for k, v in pairs(params) do
-                        new_params[k] = v
-                     end
-                     new_params[key] = param_value
-                     traverse(nested, new_params)
-                  end
-               end
-            end
-         end
-
-         traverse(impl, {})
+   for group_name, group in pairs(results) do
+      for bench_name, bench in pairs(group) do
+         traverse_params(bench, {}, group_name, bench_name, rows)
       end
    end
 
@@ -524,28 +600,30 @@ local function escape_csv(value)
    return value
 end
 
----@param flat table[]
----@return string
-local function build_suite_csv(flat)
-   -- Collect all param names
-   local param_names = {}
-   local param_set = {}
-   for _, row in ipairs(flat) do
-      for name in pairs(row.params) do
-         if not param_set[name] then
-            param_set[name] = true
-            param_names[#param_names + 1] = name
-         end
+---@param flat FlattenedRow[]
+---@return string[]
+local function collect_param_names(flat)
+   local seen = {}
+   for i = 1, #flat do
+      for name in pairs(flat[i].params) do
+         seen[name] = true
       end
    end
-   table.sort(param_names)
+   return sorted_keys(seen)
+end
+
+---@param flat FlattenedRow[]
+---@return string
+local function build_suite_csv(flat)
+   local param_names = collect_param_names(flat)
 
    -- Build header
-   local headers = { "operation", "implementation" }
-   for _, name in ipairs(param_names) do
-      headers[#headers + 1] = name
+   local headers = { "group", "benchmark" }
+   for i = 1, #param_names do
+      headers[#headers + 1] = param_names[i]
    end
-   for _, h in ipairs(SUMMARIZE_HEADERS) do
+   for i = 1, #SUMMARIZE_HEADERS do
+      local h = SUMMARIZE_HEADERS[i]
       if h ~= "name" then
          headers[#headers + 1] = h
       end
@@ -553,25 +631,26 @@ local function build_suite_csv(flat)
 
    local lines = { table.concat(headers, ",") }
 
-   -- Sort flat results
    table.sort(flat, function(a, b)
-      if a.operation ~= b.operation then
-         return a.operation < b.operation
+      if a.group ~= b.group then
+         return a.group < b.group
       end
-      if a.impl ~= b.impl then
-         return a.impl < b.impl
+      if a.benchmark ~= b.benchmark then
+         return a.benchmark < b.benchmark
       end
       return format_params(a.params) < format_params(b.params)
    end)
 
-   for _, row in ipairs(flat) do
-      local cells = { escape_csv(row.operation), escape_csv(row.impl) }
-      for _, name in ipairs(param_names) do
-         cells[#cells + 1] = escape_csv(row.params[name] or "")
+   for i = 1, #flat do
+      local row = flat[i]
+      local cells = { escape_csv(row.group), escape_csv(row.benchmark) }
+      for j = 1, #param_names do
+         cells[#cells + 1] = escape_csv(row.params[param_names[j]] or "")
       end
 
       local formatted = format_row(row.stats)
-      for _, h in ipairs(SUMMARIZE_HEADERS) do
+      for j = 1, #SUMMARIZE_HEADERS do
+         local h = SUMMARIZE_HEADERS[j]
          if h ~= "name" then
             cells[#cells + 1] = escape_csv(formatted[h] or "")
          end
@@ -587,10 +666,11 @@ end
 ---@return string
 local function build_csv(rows)
    local lines = { table.concat(SUMMARIZE_HEADERS, ",") }
-   for _, row in ipairs(rows) do
+   for i = 1, #rows do
+      local row = rows[i]
       local cells = {}
-      for i, header in ipairs(SUMMARIZE_HEADERS) do
-         cells[i] = escape_csv(row[header] or "")
+      for j = 1, #SUMMARIZE_HEADERS do
+         cells[j] = escape_csv(row[SUMMARIZE_HEADERS[j]] or "")
       end
       lines[#lines + 1] = table.concat(cells, ",")
    end
@@ -605,17 +685,19 @@ local function build_table(rows, widths, format)
    local lines = {}
 
    local header_cells, underline_cells = {}, {}
-   for i, header in ipairs(SUMMARIZE_HEADERS) do
+   for i = 1, #SUMMARIZE_HEADERS do
+      local header = SUMMARIZE_HEADERS[i]
       header_cells[i] = center(header:gsub("^%l", string.upper), widths[i])
       underline_cells[i] = string.rep("-", widths[i])
    end
    lines[1] = concat_line(header_cells, format)
    lines[2] = concat_line(underline_cells, format)
 
-   for r, row in ipairs(rows) do
+   for r = 1, #rows do
+      local row = rows[r]
       local cells = {}
-      for i, header in ipairs(SUMMARIZE_HEADERS) do
-         cells[i] = pad(row[header], widths[i])
+      for i = 1, #SUMMARIZE_HEADERS do
+         cells[i] = pad(row[SUMMARIZE_HEADERS[i]], widths[i])
       end
       lines[r + 2] = concat_line(cells, format)
    end
@@ -633,7 +715,11 @@ local function format_ranked_rows(ranked_results)
       rows[#rows + 1] = row
    end
    table.sort(rows, function(a, b)
-      return tonumber(a.rank) < tonumber(b.rank)
+      local rank_a, rank_b = tonumber(a.rank), tonumber(b.rank)
+      if rank_a ~= rank_b then
+         return rank_a < rank_b
+      end
+      return a.name < b.name
    end)
    return rows
 end
@@ -642,80 +728,83 @@ end
 ---@return integer[]
 local function calculate_widths(rows)
    local widths = {}
-   for i, header in ipairs(SUMMARIZE_HEADERS) do
+   for i = 1, #SUMMARIZE_HEADERS do
+      local header = SUMMARIZE_HEADERS[i]
       widths[i] = #header
-      for _, row in ipairs(rows) do
-         widths[i] = math.max(widths[i], #(row[header] or ""))
+      for j = 1, #rows do
+         widths[i] = math.max(widths[i], #(rows[j][header] or ""))
       end
    end
    return widths
 end
 
----@param results table
----@param format string
+---@class GroupedBenchmarks
+---@field name string Group name
+---@field params ParamValues Parameter values for this group
+---@field benchmarks table<string, Stats> Benchmark name to stats
+
+---@param flat FlattenedRow[]
+---@return GroupedBenchmarks[]
+local function collect_benchmark_groups(flat)
+   local groups = {} ---@type table<string, GroupedBenchmarks>
+   for i = 1, #flat do
+      local row = flat[i]
+      local key = row.group .. "|" .. format_params(row.params)
+      if not groups[key] then
+         groups[key] = {
+            name = row.group,
+            params = row.params,
+            benchmarks = {},
+         }
+      end
+      groups[key].benchmarks[row.benchmark] = row.stats
+   end
+
+   local sorted = {}
+   for _, group in pairs(groups) do
+      sorted[#sorted + 1] = group
+   end
+   table.sort(sorted, function(a, b)
+      if a.name ~= b.name then
+         return a.name < b.name
+      end
+      return format_params(a.params) < format_params(b.params)
+   end)
+   return sorted
+end
+
+---@param results SuiteResult
+---@param format "plain"|"compact"|"markdown"|"csv"
 ---@return string
 local function summarize_suite(results, format)
    local flat = flatten_suite_results(results)
 
-   -- Group by operation + params
-   local groups = {}
-   for _, row in ipairs(flat) do
-      local key = row.operation .. "|" .. format_params(row.params)
-      if not groups[key] then
-         groups[key] = {
-            operation = row.operation,
-            params = row.params,
-            impls = {},
-         }
-      end
-      groups[key].impls[row.impl] = row.stats
-   end
-
-   -- Sort groups
-   local sorted_groups = {}
-   for _, group in pairs(groups) do
-      sorted_groups[#sorted_groups + 1] = group
-   end
-   table.sort(sorted_groups, function(a, b)
-      if a.operation ~= b.operation then
-         return a.operation < b.operation
-      end
-      return format_params(a.params) < format_params(b.params)
-   end)
-
    if format == "csv" then
       return build_suite_csv(flat)
    end
+   ---@cast format "plain"|"compact"|"markdown"
 
-   -- Build output for each group
    local output = {}
-   for _, group in ipairs(sorted_groups) do
-      local header = group.operation
+   local benchmark_groups = collect_benchmark_groups(flat)
+   for i = 1, #benchmark_groups do
+      local group = benchmark_groups[i]
+      local header = group.name
       if next(group.params) then
          header = header .. " (" .. format_params(group.params) .. ")"
       end
       output[#output + 1] = header
 
-      local ranked = rank(group.impls, "median")
+      local ranked = rank(group.benchmarks, "median")
       local rows = format_ranked_rows(ranked)
 
       if format == "compact" then
-         local chart = build_bar_chart(rows)
-         for _, line in ipairs(chart) do
-            output[#output + 1] = line
-         end
+         array_extend(output, build_bar_chart(rows))
       else
          local widths = calculate_widths(rows)
-         local tbl = build_table(rows, widths, format)
-         for _, line in ipairs(tbl) do
-            output[#output + 1] = line
-         end
+         array_extend(output, build_table(rows, widths, format))
          if format == "plain" then
             output[#output + 1] = ""
-            local chart = build_bar_chart(rows)
-            for _, line in ipairs(chart) do
-               output[#output + 1] = line
-            end
+            array_extend(output, build_bar_chart(rows))
          end
       end
       output[#output + 1] = ""
@@ -724,24 +813,12 @@ local function summarize_suite(results, format)
    return table.concat(output, "\n")
 end
 
----Return a string summarizing the results of multiple benchmarks.
----@param benchmark_results {[string]: Stats} The benchmark results to summarize, indexed by name.
----@param format? "plain"|"compact"|"markdown"|"csv" The output format
+---@param results {[string]: Stats}
+---@param format "plain"|"compact"|"markdown"|"csv"
 ---@return string
-function luamark.summarize(benchmark_results, format)
-   assert(benchmark_results and next(benchmark_results), "'benchmark_results' is nil or empty.")
-   format = format or "plain"
-   assert(
-      format == "plain" or format == "compact" or format == "markdown" or format == "csv",
-      "format must be 'plain', 'compact', 'markdown', or 'csv'"
-   )
-
-   if is_suite_result(benchmark_results) then
-      return summarize_suite(benchmark_results, format)
-   end
-
-   benchmark_results = rank(benchmark_results, "median")
-   local rows = format_ranked_rows(benchmark_results)
+local function summarize_benchmark(results, format)
+   results = rank(results, "median")
+   local rows = format_ranked_rows(results)
 
    if format == "csv" then
       return build_csv(rows)
@@ -762,8 +839,8 @@ function luamark.summarize(benchmark_results, format)
          math.max(NAME_MIN_WIDTH, get_term_width() - other_width - (#SUMMARIZE_HEADERS - 1) * 2)
       if widths[1] > max_name then
          widths[1] = max_name
-         for _, row in ipairs(rows) do
-            row.name = truncate_name(row.name, max_name)
+         for i = 1, #rows do
+            rows[i].name = truncate_name(rows[i].name, max_name)
          end
       end
    end
@@ -779,10 +856,7 @@ function luamark.summarize(benchmark_results, format)
       table_width = table_width + (#SUMMARIZE_HEADERS - 1) * 2
 
       lines[#lines + 1] = ""
-      local bar_chart = build_bar_chart(rows, table_width)
-      for i = 1, #bar_chart do
-         lines[#lines + 1] = bar_chart[i]
-      end
+      array_extend(lines, build_bar_chart(rows, table_width))
    end
 
    return table.concat(lines, "\n")
@@ -794,8 +868,9 @@ end
 
 ---@alias Measure fun(fn: NoArgFun, iterations: integer, setup?: function, teardown?: function): number, number
 
----@param measure_once MeasureOnce
----@param precision integer
+--- Build a measurement function that runs fn multiple iterations and returns totals.
+---@param measure_once MeasureOnce Function to measure a single execution.
+---@param precision integer Decimal precision for rounding results.
 ---@return Measure
 local function build_measure(measure_once, precision)
    return function(fn, iterations, setup, teardown)
@@ -816,7 +891,7 @@ local function build_measure(measure_once, precision)
 end
 
 local measure_time = build_measure(measure_time_once, clock_precision)
-local measure_memory = build_measure(measure_memory_once, 4)
+local measure_memory = build_measure(measure_memory_once, MEMORY_PRECISION)
 
 ---@param fn NoArgFun The function to benchmark.
 ---@param setup? function Function executed before each iteration.
@@ -825,8 +900,9 @@ local measure_memory = build_measure(measure_memory_once, 4)
 local function calibrate_iterations(fn, setup, teardown)
    local min_time = get_min_clocktime() * CALIBRATION_PRECISION
    local iterations = 1
+   local max_attempts = 20
 
-   while true do
+   for _ = 1, max_attempts do
       local round_total = measure_time(fn, iterations, setup, teardown)
       if round_total >= min_time then
          break
@@ -846,10 +922,10 @@ local function calibrate_iterations(fn, setup, teardown)
    return iterations
 end
 
----Return pratical rounds and max time
+---Return practical rounds and max time
 ---@param round_duration number
 ---@return integer rounds
----@return integer max_time
+---@return number max_time
 local function calibrate_stop(round_duration)
    local max_time = math.max(config.min_rounds * round_duration, MIN_TIME)
    local rounds = math.ceil(math.min(max_time / round_duration, config.max_rounds))
@@ -909,15 +985,15 @@ local function single_benchmark(fn, measure, disable_gc, unit, rounds, max_time,
       or (rounds and completed_rounds == rounds)
       or (completed_rounds == config.max_rounds)
 
+   -- Use pcall because some Lua environments (e.g., older versions, embedded) may not support "restart".
    pcall(collectgarbage, "restart")
 
-   local results = calculate_stats(samples)
+   local results = calculate_stats(samples) --[[@as Stats]]
    results.rounds = completed_rounds
    results.iterations = iterations
    results.warmups = config.warmups
    results.timestamp = timestamp
    results.unit = unit
-   ---@cast results Stats
 
    setmetatable(results, {
       __tostring = function(self)
@@ -964,6 +1040,7 @@ local VALID_OPTS = {
    teardown = "function",
 }
 
+--- Validate benchmark options, raising an error for unknown or mistyped options.
 ---@param opts BenchmarkOptions
 local function check_options(opts)
    for k, v in pairs(opts) do
@@ -975,6 +1052,305 @@ local function check_options(opts)
          error(string.format("Option '%s' should be %s", k, opt_type))
       end
    end
+   if opts.rounds ~= nil then
+      if opts.rounds ~= math.floor(opts.rounds) then
+         error("Option 'rounds' must be an integer")
+      end
+      if opts.rounds <= 0 then
+         error("Option 'rounds' must be positive")
+      end
+   end
+   if opts.max_time ~= nil and opts.max_time <= 0 then
+      error("Option 'max_time' must be positive")
+   end
+end
+
+-- ----------------------------------------------------------------------------
+-- Suite
+-- ----------------------------------------------------------------------------
+
+-- Suite Input Types
+
+---@class SuiteBenchmarkOpts Benchmark with optional setup/teardown
+---@field fn function The function to benchmark
+---@field setup? fun(params: ParamValues) Per-benchmark setup (untimed)
+---@field teardown? fun(params: ParamValues) Per-benchmark teardown (untimed)
+
+---@class SuiteOpts Shared configuration for a group
+---@field params? table<string, any[]> Parameter names to value arrays (cartesian product)
+---@field setup? fun(params: ParamValues) Shared setup (untimed, runs before benchmark setup)
+---@field teardown? fun(params: ParamValues) Shared teardown (untimed, runs after benchmark teardown)
+---@field rounds? integer Number of benchmark rounds
+---@field max_time? number Maximum time for benchmarking
+
+---@alias SuiteBenchmark function|SuiteBenchmarkOpts Either a bare function or config with fn
+
+---@class SuiteGroup Group definition with benchmarks
+---@field opts? SuiteOpts Shared configuration (only reserved key)
+---@field [string] SuiteBenchmark Benchmarks (all other keys)
+
+---@alias SuiteSpec table<string, SuiteGroup> Map of group names to group definitions
+
+-- Suite Result Types
+
+---@alias SuiteParamResult table<any, Stats|SuiteParamResult> Nested params leading to Stats
+
+---@alias SuiteBenchmarkResult table<string, SuiteParamResult>|Stats Stats keyed by params, or Stats directly if no params
+
+---@alias SuiteGroupResult table<string, SuiteBenchmarkResult> Benchmark name to param results
+
+---@alias SuiteResult table<string, SuiteGroupResult> Group name to benchmark results
+
+-- Internal Types
+
+---@class ParsedBenchmark
+---@field fn function
+---@field setup? function
+---@field teardown? function
+
+---@class ParsedGroup
+---@field [string] ParsedBenchmark
+---@field opts? SuiteOpts
+
+---@param spec SuiteSpec
+---@return table<string, ParsedGroup>
+local function parse_suite(spec)
+   assert(spec and next(spec), "spec is empty")
+
+   local parsed = {}
+
+   for group_name, group_config in pairs(spec) do
+      assert(type(group_config) == "table", "group '" .. group_name .. "' must be a table")
+
+      parsed[group_name] = { opts = {} }
+      local has_benchmark = false
+
+      for key, value in pairs(group_config) do
+         if key == "opts" then
+            assert(
+               type(value) == "table" and not value.fn,
+               "'opts' is reserved for configuration, cannot be used as benchmark name"
+            )
+            parsed[group_name].opts = value
+         elseif type(value) == "function" then
+            parsed[group_name][key] = { fn = value }
+            has_benchmark = true
+         elseif type(value) == "table" then
+            assert(
+               type(value.fn) == "function",
+               "benchmark '" .. key .. "' must be a function or table with 'fn' function"
+            )
+            parsed[group_name][key] = {
+               fn = value.fn,
+               setup = value.setup,
+               teardown = value.teardown,
+            }
+            has_benchmark = true
+         else
+            error("benchmark '" .. key .. "' must be a function or table with 'fn'")
+         end
+      end
+
+      assert(has_benchmark, "group '" .. group_name .. "' has no benchmarks")
+   end
+
+   return parsed
+end
+
+local VALID_PARAM_TYPES = { string = true, number = true, boolean = true }
+
+---@param n number
+---@return boolean
+local function is_nan_or_inf(n)
+   return n ~= n or n == math.huge or n == -math.huge
+end
+
+---Store a value at a nested path based on parameter values.
+---Creates intermediate tables as needed. Keys are sorted alphabetically.
+---Example: set_nested(t, {n=100, type="array"}, stats) -> t.n[100].type["array"] = stats
+---Returns false when params are empty (caller should assign value directly).
+---Note: Param values must be primitives (string, number, boolean) for stable table keys and CSV output.
+---@param tbl table Target table to store into
+---@param params ParamValues Parameter names to values defining the path (values must be primitives)
+---@param value any Value to store at the nested path
+---@return boolean stored True if value was stored, false if params were empty
+local function set_nested(tbl, params, value)
+   local names = sorted_keys(params)
+
+   if #names == 0 then
+      return false
+   end
+
+   local current = tbl
+   for i = 1, #names do
+      local name = names[i]
+      local param_value = params[name]
+      local param_type = type(param_value)
+      if not VALID_PARAM_TYPES[param_type] then
+         error(
+            string.format(
+               "param '%s' has invalid type '%s' (must be string, number, or boolean)",
+               name,
+               param_type
+            )
+         )
+      end
+      if param_type == "number" and is_nan_or_inf(param_value) then
+         error(string.format("param '%s' cannot be NaN or infinite", name))
+      end
+      if i == #names then
+         current[name] = current[name] or {}
+         current[name][param_value] = value
+      else
+         current[name] = current[name] or {}
+         current[name][param_value] = current[name][param_value] or {}
+         current = current[name][param_value]
+      end
+   end
+   return true
+end
+
+---@param params table<string, any[]>
+---@return table[] # Array of param combinations
+local function expand_params(params)
+   if not params or not next(params) then
+      return { {} }
+   end
+
+   local combos = { {} }
+   local keys = sorted_keys(params)
+
+   for i = 1, #keys do
+      local name = keys[i]
+      local values = params[name]
+      local new_combos = {}
+
+      for j = 1, #combos do
+         local combo = combos[j]
+         for k = 1, #values do
+            local new_combo = shallow_copy(combo)
+            new_combo[name] = values[k]
+            new_combos[#new_combos + 1] = new_combo
+         end
+      end
+
+      combos = new_combos
+   end
+
+   return combos
+end
+
+---@param opts SuiteOpts
+---@param bench ParsedBenchmark
+---@param params ParamValues
+---@return function?
+local function build_combined_setup(opts, bench, params)
+   if not opts.setup and not bench.setup then
+      return nil
+   end
+   return function()
+      if opts.setup then
+         opts.setup(params)
+      end
+      if bench.setup then
+         bench.setup(params)
+      end
+   end
+end
+
+---@param opts SuiteOpts
+---@param bench ParsedBenchmark
+---@param params ParamValues
+---@return function?
+local function build_combined_teardown(opts, bench, params)
+   if not bench.teardown and not opts.teardown then
+      return nil
+   end
+   return function()
+      if bench.teardown then
+         bench.teardown(params)
+      end
+      if opts.teardown then
+         opts.teardown(params)
+      end
+   end
+end
+
+---@param bench ParsedBenchmark
+---@param opts SuiteOpts
+---@param params ParamValues
+---@param measure_fn Measure
+---@param unit default_unit
+---@return Stats
+local function run_benchmark(bench, opts, params, measure_fn, unit)
+   return single_benchmark(
+      bench.fn,
+      measure_fn,
+      measure_fn == measure_time,
+      unit,
+      opts.rounds,
+      opts.max_time,
+      build_combined_setup(opts, bench, params),
+      build_combined_teardown(opts, bench, params)
+   )
+end
+
+--- Run a suite of groups with benchmarks and parameters.
+---@param spec SuiteSpec
+---@param measure_fn Measure
+---@param unit? default_unit
+---@return SuiteResult
+local function run_suite(spec, measure_fn, unit)
+   unit = unit or "s"
+
+   local parsed = parse_suite(spec)
+   local results = {}
+
+   for group_name, group in pairs(parsed) do
+      results[group_name] = {}
+      local group_opts = group.opts or {} ---@type SuiteOpts
+      local params_list = expand_params(group_opts.params)
+
+      for bench_name, bench in pairs(group) do
+         if bench_name ~= "opts" then
+            ---@cast bench ParsedBenchmark
+            results[group_name][bench_name] = {}
+            for i = 1, #params_list do
+               local p = params_list[i]
+               local stats = run_benchmark(bench, group_opts, p, measure_fn, unit)
+               if not set_nested(results[group_name][bench_name], p, stats) then
+                  -- No params: assign Stats directly instead of nesting
+                  results[group_name][bench_name] = stats
+               end
+            end
+         end
+      end
+   end
+
+   return results
+end
+
+-- ----------------------------------------------------------------------------
+-- Public API
+-- ----------------------------------------------------------------------------
+
+---Return a string summarizing benchmark results.
+---@param results {[string]: Stats}|SuiteResult Benchmark or suite results
+---@param format? "plain"|"compact"|"markdown"|"csv" The output format
+---@return string
+function luamark.summarize(results, format)
+   assert(results and next(results), "'results' is nil or empty.")
+   format = format or "plain"
+   assert(
+      format == "plain" or format == "compact" or format == "markdown" or format == "csv",
+      "format must be 'plain', 'compact', 'markdown', or 'csv'"
+   )
+
+   if is_suite_result(results) then
+      return summarize_suite(results, format)
+   end
+   ---@cast results {[string]: Stats}
+   return summarize_benchmark(results, format)
 end
 
 --- Benchmarks a function for execution time. The time is represented in seconds.
@@ -1015,230 +1391,23 @@ function luamark.memit(fn, opts)
    )
 end
 
--- ----------------------------------------------------------------------------
--- Suite
--- ----------------------------------------------------------------------------
-
--- Suite Input Types
-
----@class SuiteImplConfig Implementation with optional setup/teardown
----@field fn function The function to benchmark
----@field setup? fun(params: table) Per-implementation setup (untimed)
----@field teardown? fun(params: table) Per-implementation teardown (untimed)
-
----@class SuiteOpts Shared configuration for an operation
----@field params? table<string, any[]> Parameter names to value arrays (cartesian product)
----@field setup? fun(params: table) Shared setup (untimed, runs before impl setup)
----@field teardown? fun(params: table) Shared teardown (untimed, runs after impl teardown)
----@field rounds? integer Number of benchmark rounds
----@field max_time? number Maximum time for benchmarking
-
----@alias SuiteImpl function|SuiteImplConfig Either a bare function or config with fn
-
----@class SuiteOperation Operation definition with implementations
----@field opts? SuiteOpts Shared configuration (only reserved key)
----@field [string] SuiteImpl Implementations (all other keys)
-
----@alias SuiteInput table<string, SuiteOperation> Map of operation names to operation definitions
-
--- Suite Result Types
-
----@alias SuiteParamResult table<any, Stats|SuiteParamResult> Nested params leading to Stats
-
----@alias SuiteImplResult table<string, SuiteParamResult>|{_: Stats} Stats keyed by params (or _ for no params)
-
----@alias SuiteOpResult table<string, SuiteImplResult> Implementation name to param results
-
----@alias SuiteResult table<string, SuiteOpResult> Operation name to impl results
-
--- Internal Types
-
----@class ParsedImpl
----@field fn function
----@field setup? function
----@field teardown? function
-
----@class ParsedOperation
----@field [string] ParsedImpl
----@field _opts? SuiteOpts
-
----@param suite_input SuiteInput
----@return table<string, ParsedOperation>
-local function parse_suite(suite_input)
-   assert(suite_input and next(suite_input), "suite input is empty")
-
-   local parsed = {}
-
-   for op_name, op_config in pairs(suite_input) do
-      assert(type(op_config) == "table", "operation '" .. op_name .. "' must be a table")
-
-      parsed[op_name] = { _opts = {} }
-      local has_impl = false
-
-      for key, value in pairs(op_config) do
-         if key == "opts" then
-            parsed[op_name]._opts = value
-         elseif type(value) == "function" then
-            parsed[op_name][key] = { fn = value }
-            has_impl = true
-         elseif type(value) == "table" and value.fn then
-            assert(
-               type(value.fn) == "function",
-               "implementation '" .. key .. "' must be a function or table with 'fn'"
-            )
-            parsed[op_name][key] = {
-               fn = value.fn,
-               setup = value.setup,
-               teardown = value.teardown,
-            }
-            has_impl = true
-         elseif type(value) ~= "table" then
-            error("implementation '" .. key .. "' must be a function or table with 'fn'")
-         end
-      end
-
-      assert(has_impl, "operation '" .. op_name .. "' has no implementations")
-   end
-
-   return parsed
-end
-
----@param tbl table
----@param params table
----@param value any
-local function set_nested(tbl, params, value)
-   local names = sorted_keys(params)
-
-   if #names == 0 then
-      tbl._ = value
-      return
-   end
-
-   local current = tbl
-   for i, name in ipairs(names) do
-      local param_value = params[name]
-      if i == #names then
-         current[name] = current[name] or {}
-         current[name][param_value] = value
-      else
-         current[name] = current[name] or {}
-         current[name][param_value] = current[name][param_value] or {}
-         current = current[name][param_value]
-      end
-   end
-end
-
----@param params table<string, any[]>
----@return table[] # Array of param combinations
-local function expand_params(params)
-   if not params or not next(params) then
-      return { {} }
-   end
-
-   local combos = { {} }
-
-   for _, name in ipairs(sorted_keys(params)) do
-      local values = params[name]
-      local new_combos = {}
-
-      for _, combo in ipairs(combos) do
-         for _, value in ipairs(values) do
-            local new_combo = {}
-            for k, v in pairs(combo) do
-               new_combo[k] = v
-            end
-            new_combo[name] = value
-            new_combos[#new_combos + 1] = new_combo
-         end
-      end
-
-      combos = new_combos
-   end
-
-   return combos
-end
-
---- Run a suite of benchmarks with implementations and parameters.
----@param suite_input SuiteInput
----@param measure_fn? Measure
----@param unit? default_unit
----@return SuiteResult
-local function run_suite(suite_input, measure_fn, unit)
-   measure_fn = measure_fn or measure_time
-   unit = unit or "s"
-
-   local parsed = parse_suite(suite_input)
-   local results = {}
-
-   for op_name, op in pairs(parsed) do
-      results[op_name] = {}
-      local opts = op._opts or {}
-      local params_list = expand_params(opts.params)
-
-      for impl_name, impl in pairs(op) do
-         if impl_name ~= "_opts" then
-            results[op_name][impl_name] = {}
-
-            for _, params in ipairs(params_list) do
-               -- Build combined setup: shared then impl
-               local combined_setup
-               if opts.setup or impl.setup then
-                  combined_setup = function()
-                     if opts.setup then
-                        opts.setup(params)
-                     end
-                     if impl.setup then
-                        impl.setup(params)
-                     end
-                  end
-               end
-
-               -- Build combined teardown: impl then shared
-               local combined_teardown
-               if impl.teardown or opts.teardown then
-                  combined_teardown = function()
-                     if impl.teardown then
-                        impl.teardown(params)
-                     end
-                     if opts.teardown then
-                        opts.teardown(params)
-                     end
-                  end
-               end
-
-               local stats = single_benchmark(
-                  impl.fn,
-                  measure_fn,
-                  measure_fn == measure_time,
-                  unit,
-                  opts.rounds,
-                  opts.max_time,
-                  combined_setup,
-                  combined_teardown
-               )
-
-               set_nested(results[op_name][impl_name], params, stats)
-            end
-         end
-      end
-   end
-
-   return results
-end
-
 --- Benchmarks a suite for execution time.
----@param suite_input SuiteInput Operations with implementations and optional params
----@return SuiteResult Nested results: result[operation][impl].param[value] -> Stats
-function luamark.suite(suite_input)
-   return run_suite(suite_input, measure_time, "s")
+---@param spec SuiteSpec Groups with benchmarks and optional params
+---@return SuiteResult Nested results: result[group][benchmark].param[value] -> Stats
+function luamark.suite_timeit(spec)
+   return run_suite(spec, measure_time, "s")
 end
 
 --- Benchmarks a suite for memory usage.
----@param suite_input SuiteInput Operations with implementations and optional params
----@return SuiteResult Nested results: result[operation][impl].param[value] -> Stats
-function luamark.suite_memit(suite_input)
-   return run_suite(suite_input, measure_memory, "kb")
+---@param spec SuiteSpec Groups with benchmarks and optional params
+---@return SuiteResult Nested results: result[group][benchmark].param[value] -> Stats
+function luamark.suite_memit(spec)
+   return run_suite(spec, measure_memory, "kb")
 end
+
+-- ----------------------------------------------------------------------------
+-- Internals (for testing)
+-- ----------------------------------------------------------------------------
 
 ---@package
 luamark._internal = {
@@ -1263,7 +1432,14 @@ return setmetatable(luamark, {
       if config[k] == nil then
          error("Invalid config option: " .. k)
       end
-      if type(v) ~= "number" or v <= 0 then
+      if type(v) ~= "number" then
+         error("Config value must be a number")
+      end
+      if k == "warmups" then
+         if v < 0 then
+            error("warmups must be >= 0")
+         end
+      elseif v <= 0 then
          error("Config value must be a positive number")
       end
       config[k] = v

@@ -54,26 +54,25 @@ Alternatively, you can manually include [luamark.lua](src/luamark.lua) in your p
 
 ### Basic Time Measurement
 
-Here's a simple example measuring factorial function performance:
+Here's a simple example comparing string building approaches:
 
 ```lua
 local luamark = require("luamark")
 
-function factorial(n)
-   if n == 0 then
-      return 1
-   else
-      return n * factorial(n - 1)
-   end
-end
-
--- Compare different input sizes
+-- Compare string concatenation vs table.concat
 local time_stats = luamark.timeit({
-   ["n=1"] = function()
-      factorial(1)
+   concat_loop = function()
+      local s = ""
+      for i = 1, 100 do
+         s = s .. i
+      end
    end,
-   ["n=15"] = function()
-      factorial(15)
+   table_concat = function()
+      local t = {}
+      for i = 1, 100 do
+         t[i] = i
+      end
+      local _ = table.concat(t)
    end,
 })
 
@@ -83,10 +82,10 @@ print(type(time_stats))  -- "table"
 -- Or displayed via string conversion
 print(time_stats)
 -- Output:
--- Name  Rank  Ratio  Median   Mean     Min     Max     Stddev   Rounds
--- ----  ----  -----  ------  -------  -----  -------  --------  -------
--- n=1   1     1.00   83ns    68.17ns  1ns    15.75us  83.98ns   1000000
--- n=15  2     4.52   375ns   380.5ns  208ns  21.42us  202.67ns  1000000
+--     Name      Rank  Ratio  Median    Mean     Min     Max      Stddev   Rounds
+-- ------------  ----  -----  ------  --------  -----  --------  --------  ------
+-- table_concat  1     1.00   583ns   693.1ns   500ns  46.88us   566.84ns  72508
+-- concat_loop   2     1.57   917ns   960.71ns  833ns  177.58us  546.72ns  198350
 
 -- Get the summary as a markdown table
 local md = luamark.summarize(time_stats, "markdown")
@@ -107,46 +106,44 @@ print(time_stats)
 
 ### Memory Usage Measurement
 
-Track memory allocations:
+Compare memory allocations:
 
 ```lua
-local mem_stats = luamark.memit(function()
-   local tbl = {}
-   for i = 1, 100 do
-      tbl[i] = i
-   end
-end)
+local mem_stats = luamark.memit({
+   concat_loop = function()
+      local s = ""
+      for _ = 1, 50 do
+         s = s .. "x"
+      end
+   end,
+   table_concat = function()
+      local t = {}
+      for i = 1, 50 do
+         t[i] = "x"
+      end
+      local _ = table.concat(t)
+   end,
+})
 
--- Results can be accessed as a table
-print(type(mem_stats))  -- "table"
-
--- Or displayed via string conversion
 print(mem_stats)
--- Output: 2.06kB ± 0B per round (533081 rounds)
+-- Output:
+--     Name      Rank  Ratio  Median    Mean    Min      Max    Stddev  Rounds
+-- ------------  ----  -----  -------  ------  -------  ------  ------  ------
+-- table_concat  1     1.00   660B     660B    660B     1.4kB   8B      20980
+-- concat_loop   2     3.90   2.51kB   2.51kB  2.51kB   3kB     4B      22578
 ```
 
 ### Suite API
 
-Compare multiple implementations across operations and parameter values with untimed setup:
+Compare benchmarks across parameter values with untimed setup:
 
 ```lua
 local luamark = require("luamark")
 
--- Compare table operations at different sizes
-local results = luamark.suite({
-   insert = {
-      array = function() data[#data + 1] = 1 end,
-      table_insert = function() table.insert(data, 1) end,
+local data -- shared variable for setup
 
-      opts = {
-         params = { n = { 100, 1000, 10000 } },
-         setup = function(p)
-            -- Untimed: create table with initial size
-            data = {}
-            for i = 1, p.n do data[i] = i end
-         end,
-      },
-   },
+-- Compare string concatenation at different sizes
+local results = luamark.suite_timeit({
    concat = {
       loop = function()
          local s = ""
@@ -157,6 +154,7 @@ local results = luamark.suite({
       opts = {
          params = { n = { 10, 100, 1000 } },
          setup = function(p)
+            -- Untimed: create table with data
             data = {}
             for i = 1, p.n do data[i] = tostring(i) end
          end,
@@ -167,22 +165,25 @@ local results = luamark.suite({
 -- Display results
 print(luamark.summarize(results, "plain"))
 
--- Export to CSV
-local csv = luamark.summarize(results, "csv")
-local f = io.open("results.csv", "w")
-f:write(csv)
-f:close()
-
 -- Access individual stats
 local loop_100 = results.concat.loop.n[100]
 print(loop_100.median)  -- median time for loop concat with n=100
+```
+
+**Structure**: A suite spec contains **groups**, and each group contains **benchmarks**:
+
+```text
+spec (the table passed to suite_timeit)
+└── group ("concat" in the example)
+    ├── benchmark ("loop", "table_concat")
+    └── opts (shared setup, params, etc.)
 ```
 
 Key features:
 
 - **Untimed setup/teardown**: Generate test data without affecting timing
 - **Parameter expansion**: Cartesian product of all parameter values
-- **Nested results**: `results[operation][impl].param[value]` → Stats
+- **Nested results**: `results[group][benchmark].param[value]` → Stats
 
 ## Technical Details
 

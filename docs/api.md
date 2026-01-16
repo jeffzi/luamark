@@ -11,9 +11,20 @@ luamark.max_rounds = 1e6      -- Maximum benchmark rounds
 luamark.warmups = 1           -- Number of warmup rounds
 ```
 
-## BenchmarkOptions
+Read-only fields:
 
-### max_time
+```lua
+luamark._VERSION    -- Library version (e.g., "0.9.0")
+luamark.clock_name  -- Active clock backend ("chronos", "posix.time", "socket", or "os.clock")
+```
+
+---
+
+## Core API
+
+### BenchmarkOptions
+
+#### max_time
 
 ```lua
 number?
@@ -21,7 +32,7 @@ number?
 
 Maximum run time in seconds. It may be exceeded if test function is very slow.
 
-### rounds
+#### rounds
 
 ```lua
 integer?
@@ -29,7 +40,7 @@ integer?
 
 The number of times to run the benchmark. Defaults to a predetermined number if not provided.
 
-### setup
+#### setup
 
 ```lua
 fun()?
@@ -37,7 +48,7 @@ fun()?
 
 Function executed before each iteration.
 
-### teardown
+#### teardown
 
 ```lua
 fun()?
@@ -45,29 +56,29 @@ fun()?
 
 Function executed after each iteration.
 
-## Stats
+### Stats
 
 Returned by `timeit` and `memit`.
 
-| Field | Type | Description |
-| ----- | ---- | ----------- |
-| count | integer | Number of samples collected |
-| mean | number | Arithmetic mean of samples |
-| median | number | Median value of samples |
-| min | number | Minimum sample value |
-| max | number | Maximum sample value |
-| stddev | number | Standard deviation of samples |
-| total | number | Sum of all samples |
-| samples | number[] | Raw samples (sorted) |
-| rounds | integer | Number of benchmark rounds executed |
-| iterations | integer | Number of iterations per round |
-| warmups | integer | Number of warmup rounds |
-| timestamp | string | ISO 8601 UTC timestamp of benchmark start |
-| unit | "s"\|"kb" | Measurement unit (seconds or kilobytes) |
-| rank | integer? | Rank when comparing multiple benchmarks |
-| ratio | number? | Ratio relative to fastest benchmark |
+| Field      | Type      | Description                               |
+| ---------- | --------- | ----------------------------------------- |
+| count      | integer   | Number of samples collected               |
+| mean       | number    | Arithmetic mean of samples                |
+| median     | number    | Median value of samples                   |
+| min        | number    | Minimum sample value                      |
+| max        | number    | Maximum sample value                      |
+| stddev     | number    | Standard deviation of samples             |
+| total      | number    | Sum of all samples                        |
+| samples    | number[]  | Raw samples (sorted)                      |
+| rounds     | integer   | Number of benchmark rounds executed       |
+| iterations | integer   | Number of iterations per round            |
+| warmups    | integer   | Number of warmup rounds                   |
+| timestamp  | string    | ISO 8601 UTC timestamp of benchmark start |
+| unit       | "s"\|"kb" | Measurement unit (seconds or kilobytes)   |
+| rank       | integer?  | Rank when comparing multiple benchmarks   |
+| ratio      | number?   | Ratio relative to fastest benchmark       |
 
-## timeit
+### timeit
 
 ```lua
 function luamark.timeit(fn: fun()|{ [string]: fun() }, opts?: BenchmarkOptions)
@@ -82,7 +93,7 @@ Benchmarks a function for execution time. The time is represented in seconds.
 
 @_return_ — Stats for single function, or table of Stats indexed by name for multiple functions.
 
-## memit
+### memit
 
 ```lua
 function luamark.memit(fn: fun()|{ [string]: fun() }, opts?: BenchmarkOptions)
@@ -97,7 +108,7 @@ Benchmarks a function for memory usage. The memory usage is represented in kilob
 
 @_return_ — Stats for single function, or table of Stats indexed by name for multiple functions.
 
-## summarize
+### summarize
 
 ```lua
 function luamark.summarize(benchmark_results: { [string]: Stats }|SuiteResult, format?: "plain"|"compact"|"markdown"|"csv")
@@ -106,7 +117,7 @@ function luamark.summarize(benchmark_results: { [string]: Stats }|SuiteResult, f
 
 Return a string summarizing the results of multiple benchmarks.
 
-@_param_ `benchmark_results` — The benchmark results to summarize (from `timeit`/`memit` or `suite`/`suite_memit`).
+@_param_ `benchmark_results` — The benchmark results to summarize (from `timeit`/`memit` or `suite_timeit`/`suite_memit`).
 
 @_param_ `format` — The output format (default: "plain")
 
@@ -115,31 +126,51 @@ format:
     | "plain"    -- Table with bar chart
     | "compact"  -- Bar chart only
     | "markdown" -- Markdown table (no bar chart)
-    | "csv"      -- CSV format (suite results only)
+    | "csv"      -- CSV format
 ```
 
-## SuiteOpts
+---
 
-Shared configuration for an operation.
+## Suite API
 
-| Field | Type | Description |
-| ----- | ---- | ----------- |
-| params | table<string, any[]>? | Parameter names mapped to arrays of values (cartesian product) |
-| setup | fun(params: table)? | Shared setup function (untimed, runs before impl setup) |
-| teardown | fun(params: table)? | Shared teardown function (untimed, runs after impl teardown) |
-| rounds | integer? | Number of benchmark rounds |
-| max_time | number? | Maximum time for benchmarking |
+### Hierarchy
 
-## SuiteInput
+A suite spec is organized into **groups**, each containing **benchmarks**:
 
-Map of operation names to operation definitions.
+```text
+spec (table passed to suite_timeit/suite_memit)
+└── group (named collection of related benchmarks)
+    ├── benchmark (function to measure)
+    ├── benchmark ...
+    └── opts (shared configuration: params, setup, teardown)
+```
+
+- **Spec**: The top-level table containing all groups
+- **Group**: A named collection of benchmarks that share configuration (setup, params)
+- **Benchmark**: An individual function to measure
+
+### SuiteOpts
+
+Shared configuration for a group.
+
+| Field    | Type                  | Description                                        |
+| -------- | --------------------- | -------------------------------------------------- |
+| params   | table<string, any[]>? | Parameter names mapped to arrays of values         |
+| setup    | fun(params: table)?   | Shared setup (untimed, runs before benchmark)      |
+| teardown | fun(params: table)?   | Shared teardown (untimed, runs after benchmark)    |
+| rounds   | integer?              | Number of benchmark rounds                         |
+| max_time | number?               | Maximum time for benchmarking                      |
+
+### SuiteSpec
+
+Map of group names to group definitions.
 
 ```lua
 {
-  [operation_name] = {
-    -- Implementations (all keys except 'opts')
-    impl1 = fn,                                            -- bare function
-    impl2 = { fn = fn, setup = fn?, teardown = fn? },      -- with per-impl config
+  [group_name] = {
+    -- Benchmarks (all keys except 'opts')
+    bench1 = fn,                                            -- bare function
+    bench2 = { fn = fn, setup = fn(params)?, teardown = fn(params)? },  -- with per-benchmark config
 
     -- Shared configuration (only reserved key)
     opts = SuiteOpts?,
@@ -147,53 +178,49 @@ Map of operation names to operation definitions.
 }
 ```
 
-## SuiteResult
+### SuiteResult
 
-Nested result structure: `result[operation][impl].param[value]` → Stats
+Nested result structure:
 
 ```lua
--- Single parameter
+-- With parameters: result[group][benchmark].param[value] → Stats
 results["sort"]["quick"].n[1000]  -- → Stats
+results["group"]["bench"].m[10].n[100]  -- → Stats (multiple params, sorted alphabetically)
 
--- Multiple parameters (sorted alphabetically)
-results["op"]["impl"].m[10].n[100]  -- → Stats
-
--- No parameters
-results["op"]["impl"]._  -- → Stats
+-- No parameters: result[group][benchmark] → Stats (directly)
+results["group"]["bench"]  -- → Stats
 ```
 
-## suite
+### suite_timeit
 
 ```lua
-function luamark.suite(suite_input: SuiteInput)
-  -> SuiteResult
+function luamark.suite_timeit(spec: SuiteSpec) -> SuiteResult
 ```
 
 Benchmarks a suite for execution time with untimed setup/teardown and parameter expansion.
 
-@_param_ `suite_input` — Operations with implementations and optional params.
+@_param_ `spec` — Groups with benchmarks and optional params.
 
-@_return_ — Nested results: `result[operation][impl].param[value]` → Stats
+@_return_ — Nested results: `result[group][benchmark].param[value]` → Stats
 
-### Setup/Teardown Execution Order
+#### Setup/Teardown Execution Order
 
-For each (operation, implementation, param_combination):
+For each (group, benchmark, param_combination):
 
 1. `opts.setup(params)` - shared setup (untimed)
-2. `impl.setup(params)` - per-implementation setup (untimed)
-3. **measurement loop** - times only `impl.fn`
-4. `impl.teardown(params)` - per-implementation teardown (untimed)
+2. `bench.setup(params)` - per-benchmark setup (untimed)
+3. **measurement loop** - times only `bench.fn`
+4. `bench.teardown(params)` - per-benchmark teardown (untimed)
 5. `opts.teardown(params)` - shared teardown (untimed)
 
-## suite_memit
+### suite_memit
 
 ```lua
-function luamark.suite_memit(suite_input: SuiteInput)
-  -> SuiteResult
+function luamark.suite_memit(spec: SuiteSpec) -> SuiteResult
 ```
 
 Benchmarks a suite for memory usage with untimed setup/teardown and parameter expansion.
 
-@_param_ `suite_input` — Operations with implementations and optional params.
+@_param_ `spec` — Groups with benchmarks and optional params.
 
-@_return_ — Nested results: `result[operation][impl].param[value]` → Stats
+@_return_ — Nested results: `result[group][benchmark].param[value]` → Stats
