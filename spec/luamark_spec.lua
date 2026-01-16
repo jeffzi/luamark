@@ -462,6 +462,57 @@ describe("summarize", function()
       end, "format must be 'plain', 'compact', 'markdown', or 'csv'")
    end)
 
+   test("markdown format outputs pipe-delimited table", function()
+      local results = {
+         fast = make_stats(),
+         slow = make_stats({ median = 300, mean = 300, min = 280, max = 320, stddev = 10 }),
+      }
+      luamark._internal.rank(results, "median")
+      local output = luamark.summarize(results, "markdown")
+      assert.matches("^|", output)
+      assert.matches("| Name |", output)
+      assert.matches("| fast |", output)
+      assert.matches("| slow |", output)
+      assert.not_matches("%.%.%.", output) -- No bar chart
+   end)
+
+   test("suite markdown format outputs pipe-delimited table", function()
+      local results = luamark.suite_timeit({
+         add = {
+            fast = function() end,
+            slow = function() end,
+            opts = {
+               params = { n = { 100 } },
+               rounds = 3,
+            },
+         },
+      })
+
+      local output = luamark.summarize(results, "markdown")
+      assert.matches("^add %(n=100%)", output)
+      assert.matches("| Name |", output)
+      assert.matches("| fast |", output)
+      assert.matches("| slow |", output)
+   end)
+
+   test("suite compact format shows only bar chart", function()
+      local results = luamark.suite_timeit({
+         add = {
+            fast = function() end,
+            slow = function() end,
+            opts = {
+               params = { n = { 100 } },
+               rounds = 3,
+            },
+         },
+      })
+
+      local output = luamark.summarize(results, "compact")
+      assert.not_matches("| Name |", output)
+      assert.matches("|", output)
+      assert.matches("x", output)
+   end)
+
    test("plain format includes table and bar chart", function()
       local results = {
          fast = make_stats(),
