@@ -164,59 +164,6 @@ local function escape_csv(value)
    return value
 end
 
----@param n number
----@return boolean
-local function is_nan_or_inf(n)
-   return n ~= n or n == math.huge or n == -math.huge
-end
-
-local VALID_PARAM_TYPES = { string = true, number = true, boolean = true }
-
----Store a value at a nested path based on parameter values.
----Creates intermediate tables as needed. Keys are sorted alphabetically.
----Example: set_nested(t, {n=100, type="array"}, stats) -> t.n[100].type["array"] = stats
----Returns false when params are empty (caller should assign value directly).
----@param tbl table Target table to store into
----@param params table Parameter names to values (values must be primitives)
----@param value any Value to store at the nested path
----@return boolean stored True if value was stored, false if params were empty
-local function set_nested(tbl, params, value)
-   local names = sorted_keys(params)
-
-   if #names == 0 then
-      return false
-   end
-
-   local current = tbl
-   for i = 1, #names do
-      local name = names[i]
-      local param_value = params[name]
-      local param_type = type(param_value)
-      if not VALID_PARAM_TYPES[param_type] then
-         error(
-            string.format(
-               "param '%s' has invalid type '%s' (must be string, number, or boolean): %s",
-               name,
-               param_type,
-               tostring(param_value)
-            )
-         )
-      end
-      if param_type == "number" and is_nan_or_inf(param_value) then
-         error("param '" .. name .. "' cannot be NaN or infinite")
-      end
-      if i == #names then
-         current[name] = current[name] or {}
-         current[name][param_value] = value
-      else
-         current[name] = current[name] or {}
-         current[name][param_value] = current[name][param_value] or {}
-         current = current[name][param_value]
-      end
-   end
-   return true
-end
-
 ---@param params table<string, any[]>?
 ---@return table[] # Array of param combinations
 local function expand_params(params)
@@ -651,64 +598,8 @@ local function build_table(rows, widths, format)
 end
 
 -- ----------------------------------------------------------------------------
--- Result type detection and parameterized summarization
+-- Parameterized result helpers
 -- ----------------------------------------------------------------------------
-
----Find depth to Stats (median field) by traversing first path.
----@param tbl table
----@param depth integer
----@return integer|nil
-local function find_stats_depth(tbl, depth)
-   if tbl.median then
-      return depth
-   end
-   local _, first = next(tbl)
-   if type(first) ~= "table" then
-      return nil
-   end
-   return find_stats_depth(first, depth + 1)
-end
-
----Detect the type of benchmark results structure.
----Result structures (depth from root to Stats):
---- - Stats (depth 0): "stats"
---- - {name: Stats} (depth 1): "multi"
---- - {param: {value: Stats}} (depth 2): "params" (1 param)
---- - {name: {param: {value: Stats}}} (depth 3): "multi_params" (1 param) OR "params" (2 params)
---- - {param1: {v1: {param2: {v2: Stats}}}} (depth 4): "params" (2 params)
---- - {name: {param1: {v1: {param2: {v2: Stats}}}}} (depth 5): "multi_params" (2 params)
----
----For ambiguous cases (depth 3+), we check pattern: params has even depth, multi_params has odd depth
----@param results table
----@return "stats"|"multi"|"params"|"multi_params"
-local function detect_result_type(results)
-   if results.median then
-      return "stats"
-   end
-
-   local depth = find_stats_depth(results, 0)
-   if not depth then
-      error("Invalid result structure: no Stats found")
-   end
-
-   if depth == 1 then
-      return "multi" -- {name: Stats}
-   end
-
-   if depth == 2 then
-      return "params" -- {param: {value: Stats}}
-   end
-
-   -- Depth >= 3: structure alternates between param layers and name layer.
-   -- Each param adds 2 levels ({param_name: {param_value: ...}}), name adds 1.
-   -- Even depth = only param layers = single function ("params")
-   -- Odd depth = name layer + param layers = multiple functions ("multi_params")
-   if depth % 2 == 0 then
-      return "params"
-   else
-      return "multi_params"
-   end
-end
 
 ---Format parameter values as a readable string.
 ---@param params table Parameter name to value mapping
@@ -723,40 +614,38 @@ local function format_params(params)
    return table.concat(parts, ", ")
 end
 
----@class FlatRow
----@field name string Benchmark name
----@field params table Parameter values
----@field stats Stats
+---@class BenchmarkRow
+---@field name string Benchmark name ("1" for unnamed single function).
+---@field params table Parameter values for this run.
+---@field stats Stats Benchmark statistics.
 
----Traverse nested param structure to find Stats.
----Structure is: {param_name: {param_value: Stats|nested}}
----@param tbl table
----@param params table Accumulated params
----@param name string Benchmark name
----@param rows FlatRow[]
-local function traverse_params(tbl, params, name, rows)
-   if tbl.median then
-      ---@cast tbl Stats
-      rows[#rows + 1] = { name = name, params = params, stats = tbl }
-      return
+---Rank benchmark results within each parameter combination.
+---@param results BenchmarkRow[]
+local function rank_results(results)
+   -- Group by params key
+   local groups = {}
+   for i = 1, #results do
+      local row = results[i]
+      local key = format_params(row.params)
+      groups[key] = groups[key] or {}
+      groups[key][#groups[key] + 1] = row
    end
-
-   -- Structure is {param_name: {param_value: nested}}
-   for param_name, param_values in pairs(tbl) do
-      if type(param_values) == "table" then
-         for param_value, nested in pairs(param_values) do
-            if type(nested) == "table" then
-               local new_params = shallow_copy(params)
-               new_params[param_name] = param_value
-               traverse_params(nested, new_params, name, rows)
-            end
-         end
+   -- Rank within each group by median
+   for _, group in pairs(groups) do
+      table.sort(group, function(a, b)
+         return a.stats.median < b.stats.median
+      end)
+      local min_median = group[1].stats.median
+      for i = 1, #group do
+         group[i].stats.rank = i
+         group[i].stats.ratio = (i == 1 or min_median == 0) and 1
+            or group[i].stats.median / min_median
       end
    end
 end
 
 ---Collect all unique parameter names from flattened rows.
----@param rows FlatRow[]
+---@param rows BenchmarkRow[]
 ---@return string[]
 local function collect_param_names(rows)
    local seen = {}
@@ -769,7 +658,7 @@ local function collect_param_names(rows)
 end
 
 ---Build CSV output for parameterized results.
----@param rows FlatRow[]
+---@param rows BenchmarkRow[]
 ---@return string
 local function build_params_csv(rows)
    local param_names = collect_param_names(rows)
@@ -871,60 +760,6 @@ local function summarize_benchmark(results, format, max_width)
    local lines = build_table(rows, widths, format)
 
    return table.concat(lines, "\n")
-end
-
----Summarize parameterized results (single or multi with params).
----@param results table
----@param result_type "params"|"multi_params"
----@param format "plain"|"compact"|"markdown"|"csv"
----@param max_width? integer
----@return string
-local function summarize_parameterized(results, result_type, format, max_width)
-   -- Flatten results into rows with params
-   local rows = {}
-
-   if result_type == "params" then
-      -- Single function with params: results[param][value] -> Stats
-      traverse_params(results, {}, "result", rows)
-   else
-      -- Multi functions with params: results[name][param][value] -> Stats
-      for name, bench_results in pairs(results) do
-         traverse_params(bench_results, {}, name, rows)
-      end
-   end
-
-   if format == "csv" then
-      return build_params_csv(rows)
-   end
-
-   -- Group rows by param combination
-   local groups = {} ---@type table<string, {[string]: Stats}>
-   for i = 1, #rows do
-      local row = rows[i]
-      local key = format_params(row.params)
-      groups[key] = groups[key] or {}
-      groups[key][row.name] = row.stats
-   end
-
-   -- Build output for each group
-   local output = {}
-   local group_keys = sorted_keys(groups)
-   for i = 1, #group_keys do
-      local param_key = group_keys[i]
-      local group = groups[param_key]
-
-      -- Add header with params (skip if single function with empty params)
-      if result_type == "multi_params" or param_key ~= "" then
-         output[#output + 1] = param_key
-      end
-
-      -- Rank and format this group
-      local formatted = summarize_benchmark(group, format, max_width)
-      output[#output + 1] = formatted
-      output[#output + 1] = "" -- blank line between groups
-   end
-
-   return table.concat(output, "\n")
 end
 
 -- ----------------------------------------------------------------------------
@@ -1186,37 +1021,15 @@ end
 ---@param disable_gc boolean
 ---@param unit default_unit
 ---@param opts Options
----@return Stats|table
+---@return BenchmarkRow[]
 local function benchmark(target, measure, disable_gc, unit, opts)
-   ---@diagnostic disable: param-type-mismatch
    opts = opts or {}
-   local params_spec = opts.params
-   local params_list = expand_params(params_spec)
-   local has_params = params_spec and next(params_spec)
+   local params_list = expand_params(opts.params)
    local is_single_fn = type(target) == "function"
+   local results = {}
 
-   -- Single function, no params -> Stats
-   if is_single_fn and not has_params then
-      return single_benchmark(
-         target,
-         measure,
-         disable_gc,
-         unit,
-         opts.rounds,
-         opts.max_time,
-         opts.setup,
-         opts.teardown,
-         {}, -- empty params
-         nil, -- no per-function before
-         nil, -- no per-function after
-         opts.before,
-         opts.after
-      )
-   end
-
-   -- Single function with params -> nested by params
    if is_single_fn then
-      local results = {}
+      ---@cast target function
       for i = 1, #params_list do
          local p = params_list[i]
          local stats = single_benchmark(
@@ -1229,71 +1042,47 @@ local function benchmark(target, measure, disable_gc, unit, opts)
             opts.setup,
             opts.teardown,
             p,
-            nil, -- no per-function before
-            nil, -- no per-function after
+            nil,
+            nil,
             opts.before,
             opts.after
          )
-         set_nested(results, p, stats)
+         results[#results + 1] = { name = "1", params = p, stats = stats }
       end
-      return results
+   else
+      ---@cast target table
+      local names = sorted_keys(target)
+      for j = 1, #names do
+         local name = names[j]
+         local fn, spec_before, spec_after = parse_spec(target[name])
+         for i = 1, #params_list do
+            local p = params_list[i]
+            local stats = single_benchmark(
+               fn,
+               measure,
+               disable_gc,
+               unit,
+               opts.rounds,
+               opts.max_time,
+               opts.setup,
+               opts.teardown,
+               p,
+               spec_before,
+               spec_after,
+               opts.before,
+               opts.after
+            )
+            results[#results + 1] = { name = name, params = p, stats = stats }
+         end
+      end
    end
 
-   -- Multiple functions, no params -> {name: Stats}
-   if not has_params then
-      local results = {}
-      for name, spec in pairs(target) do
-         local fn, spec_before, spec_after = parse_spec(spec)
-         results[name] = single_benchmark(
-            fn,
-            measure,
-            disable_gc,
-            unit,
-            opts.rounds,
-            opts.max_time,
-            opts.setup,
-            opts.teardown,
-            {},
-            spec_before,
-            spec_after,
-            opts.before,
-            opts.after
-         )
-      end
-      local stats = rank(results, "median")
-      setmetatable(stats, {
-         __tostring = function(self)
-            return luamark.summarize(self)
-         end,
-      })
-      return stats
-   end
-
-   -- Multiple functions with params -> {name: {param: {value: Stats}}}
-   local results = {}
-   for name, spec in pairs(target) do
-      local fn, spec_before, spec_after = parse_spec(spec)
-      results[name] = {}
-      for i = 1, #params_list do
-         local p = params_list[i]
-         local stats = single_benchmark(
-            fn,
-            measure,
-            disable_gc,
-            unit,
-            opts.rounds,
-            opts.max_time,
-            opts.setup,
-            opts.teardown,
-            p,
-            spec_before,
-            spec_after,
-            opts.before,
-            opts.after
-         )
-         set_nested(results[name], p, stats)
-      end
-   end
+   rank_results(results)
+   setmetatable(results, {
+      __tostring = function(self)
+         return luamark.summarize(self)
+      end,
+   })
    return results
 end
 
@@ -1366,17 +1155,13 @@ end
 -- ----------------------------------------------------------------------------
 
 --- Return a string summarizing benchmark results.
---- Handle all result types from the unified API:
---- - Single function, no params: Stats
---- - Multiple functions, no params: {name: Stats}
---- - Single function, with params: {param: {value: Stats}}
---- - Multiple functions, with params: {name: {param: {value: Stats}}}
----@param results table Benchmark results to summarize.
+--- Results are now always BenchmarkRow[] (flat array).
+---@param results BenchmarkRow[] Benchmark results to summarize.
 ---@param format? "plain"|"compact"|"markdown"|"csv" Output format.
 ---@param max_width? integer Maximum output width (default: terminal width).
 ---@return string
 function luamark.summarize(results, format, max_width)
-   assert(results and next(results), "'results' is nil or empty.")
+   assert(results and #results > 0, "'results' is nil or empty.")
    format = format or "plain"
    assert(
       format == "plain" or format == "compact" or format == "markdown" or format == "csv",
@@ -1385,28 +1170,64 @@ function luamark.summarize(results, format, max_width)
 
    max_width = max_width or get_term_width()
 
-   local result_type = detect_result_type(results)
-
-   -- Single Stats object: wrap as {"result": Stats} for consistent handling
-   if result_type == "stats" then
-      ---@cast results Stats
-      return summarize_benchmark({ result = results }, format, max_width)
+   -- Check if any row has non-empty params
+   local has_params = false
+   for i = 1, #results do
+      if next(results[i].params) then
+         has_params = true
+         break
+      end
    end
 
-   -- Multiple functions, no params: {name: Stats}
-   if result_type == "multi" then
-      return summarize_benchmark(results, format, max_width)
+   -- CSV format with params needs special handling
+   if format == "csv" then
+      return build_params_csv(results)
    end
 
-   -- Single or multiple functions with params
-   ---@cast result_type "params"|"multi_params"
-   return summarize_parameterized(results, result_type, format, max_width)
+   -- No params: simple table/chart
+   if not has_params then
+      -- Convert to {name: Stats} for summarize_benchmark
+      local by_name = {}
+      for i = 1, #results do
+         by_name[results[i].name] = results[i].stats
+      end
+      return summarize_benchmark(by_name, format, max_width)
+   end
+
+   -- With params: group by param combination
+   local groups = {} ---@type table<string, {[string]: Stats}>
+   for i = 1, #results do
+      local row = results[i]
+      local key = format_params(row.params)
+      groups[key] = groups[key] or {}
+      groups[key][row.name] = row.stats
+   end
+
+   -- Build output for each group
+   local output = {}
+   local group_keys = sorted_keys(groups)
+   for i = 1, #group_keys do
+      local param_key = group_keys[i]
+      local group = groups[param_key]
+
+      -- Add header with params
+      if param_key ~= "" then
+         output[#output + 1] = param_key
+      end
+
+      -- Rank and format this group
+      local formatted = summarize_benchmark(group, format, max_width)
+      output[#output + 1] = formatted
+      output[#output + 1] = "" -- blank line between groups
+   end
+
+   return table.concat(output, "\n")
 end
 
 --- Benchmark a function for execution time. Time is represented in seconds.
 ---@param target Target Function or table of functions/Specs to benchmark.
 ---@param opts? Options Benchmark configuration.
----@return Stats|table Stats for single function, nested results for params, or table of Stats for multiple functions.
+---@return BenchmarkRow[] Flat array of benchmark results.
 function luamark.timeit(target, opts)
    opts = opts or {}
    validate_options(opts)
@@ -1416,7 +1237,7 @@ end
 --- Benchmark a function for memory usage. Memory is represented in kilobytes.
 ---@param target Target Function or table of functions/Specs to benchmark.
 ---@param opts? Options Benchmark configuration.
----@return Stats|table Stats for single function, nested results for params, or table of Stats for multiple functions.
+---@return BenchmarkRow[] Flat array of benchmark results.
 function luamark.memit(target, opts)
    opts = opts or {}
    validate_options(opts)

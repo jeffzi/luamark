@@ -97,21 +97,23 @@ for _, clock_name in ipairs(CLOCKS) do
             local bench_suffix = string.format(" (%s)", name)
 
             test("benchmarks single function" .. bench_suffix, function()
-               local stats = benchmark(noop, { rounds = 1 })
-               assert_stats_not_nil(stats)
+               local results = benchmark(noop, { rounds = 1 })
+               assert.are_equal(1, #results)
+               assert.are_equal("1", results[1].name)
+               assert_stats_not_nil(results[1].stats)
             end)
 
             test("benchmarks multiple functions" .. bench_suffix, function()
-               local root_stats = benchmark({ a = noop, b = noop }, { rounds = 1 })
+               local results = benchmark({ a = noop, b = noop }, { rounds = 1 })
 
-               assert.is_not_nil(root_stats.a)
-               assert.is_not_nil(root_stats.b)
-               local size = 0
-               for _, stats in pairs(root_stats) do
-                  size = size + 1
-                  assert_stats_not_nil(stats)
+               assert.are_equal(2, #results)
+               local names = {}
+               for i = 1, #results do
+                  names[results[i].name] = true
+                  assert_stats_not_nil(results[i].stats)
                end
-               assert.equal(size, 2)
+               assert.is_true(names.a)
+               assert.is_true(names.b)
             end)
 
             local calls = 0
@@ -125,7 +127,8 @@ for _, clock_name in ipairs(CLOCKS) do
             end
 
             local rounds = 3
-            local stats = benchmark(counter, { rounds = rounds })
+            local results = benchmark(counter, { rounds = rounds })
+            local stats = results[1].stats
 
             test("tracks iteration count" .. bench_suffix, function()
                assert.are_equal(1, stats.iterations)
@@ -192,7 +195,8 @@ for _, clock_name in ipairs(CLOCKS) do
 
          local rounds = 100
 
-         local stats = luamark.timeit(counter, { rounds = rounds, max_time = 1 })
+         local results = luamark.timeit(counter, { rounds = rounds, max_time = 1 })
+         local stats = results[1].stats
 
          test("computes minimum time", function()
             assert.is_near(SLEEP_TIME, stats.min, TIME_TOL)
@@ -232,9 +236,12 @@ for _, clock_name in ipairs(CLOCKS) do
                   t = nil
                end,
             }
-            local all_stats = luamark.memit(funcs, { rounds = 100 })
+            local all_results = luamark.memit(funcs, { rounds = 100 })
 
-            for func_name, stats in pairs(all_stats) do
+            for i = 1, #all_results do
+               local row = all_results[i]
+               local func_name = row.name
+               local stats = row.stats
                local single_call_memory = luamark._internal.measure_memory(funcs[func_name], 1)
 
                test("mean: " .. func_name, function()
@@ -431,32 +438,45 @@ describe("summarize", function()
 
    test("invalid format error", function()
       assert.has.error(function()
-         luamark.summarize({ test = { median = 1 } }, "invalid")
+         luamark.summarize({
+            { name = "test", params = {}, stats = { median = 1, unit = "s" } },
+         }, "invalid")
       end, "format must be 'plain', 'compact', 'markdown', or 'csv'")
    end)
 
    test("plain format includes table and bar chart", function()
       local results = {
-         fast = {
-            median = 100,
-            mean = 100,
-            min = 90,
-            max = 110,
-            stddev = 5,
-            rounds = 10,
-            unit = "s",
+         {
+            name = "fast",
+            params = {},
+            stats = {
+               median = 100,
+               mean = 100,
+               min = 90,
+               max = 110,
+               stddev = 5,
+               rounds = 10,
+               unit = "s",
+               rank = 1,
+               ratio = 1,
+            },
          },
-         slow = {
-            median = 300,
-            mean = 300,
-            min = 280,
-            max = 320,
-            stddev = 10,
-            rounds = 10,
-            unit = "s",
+         {
+            name = "slow",
+            params = {},
+            stats = {
+               median = 300,
+               mean = 300,
+               min = 280,
+               max = 320,
+               stddev = 10,
+               rounds = 10,
+               unit = "s",
+               rank = 2,
+               ratio = 3,
+            },
          },
       }
-      luamark._internal.rank(results, "median")
       local output = luamark.summarize(results, "plain")
       assert.matches("Name", output)
       assert.matches("fast.*█.*1%.00x", output)
@@ -465,26 +485,37 @@ describe("summarize", function()
 
    test("compact format shows only bar chart", function()
       local results = {
-         fast = {
-            median = 100,
-            mean = 100,
-            min = 90,
-            max = 110,
-            stddev = 5,
-            rounds = 10,
-            unit = "s",
+         {
+            name = "fast",
+            params = {},
+            stats = {
+               median = 100,
+               mean = 100,
+               min = 90,
+               max = 110,
+               stddev = 5,
+               rounds = 10,
+               unit = "s",
+               rank = 1,
+               ratio = 1,
+            },
          },
-         slow = {
-            median = 300,
-            mean = 300,
-            min = 280,
-            max = 320,
-            stddev = 10,
-            rounds = 10,
-            unit = "s",
+         {
+            name = "slow",
+            params = {},
+            stats = {
+               median = 300,
+               mean = 300,
+               min = 280,
+               max = 320,
+               stddev = 10,
+               rounds = 10,
+               unit = "s",
+               rank = 2,
+               ratio = 3,
+            },
          },
       }
-      luamark._internal.rank(results, "median")
       local output = luamark.summarize(results, "compact")
       assert.not_matches("Name", output)
       assert.matches("fast.*█.*1%.00x", output)
@@ -493,26 +524,37 @@ describe("summarize", function()
 
    test("plain and compact truncate long names to fit terminal width", function()
       local results = {
-         very_long_function_name_that_should_definitely_be_truncated_to_fit_the_terminal_width_limit = {
-            median = 100,
-            mean = 100,
-            min = 90,
-            max = 110,
-            stddev = 5,
-            rounds = 10,
-            unit = "s",
+         {
+            name = "very_long_function_name_that_should_definitely_be_truncated_to_fit_the_terminal_width_limit",
+            params = {},
+            stats = {
+               median = 100,
+               mean = 100,
+               min = 90,
+               max = 110,
+               stddev = 5,
+               rounds = 10,
+               unit = "s",
+               rank = 1,
+               ratio = 1,
+            },
          },
-         short = {
-            median = 500,
-            mean = 500,
-            min = 450,
-            max = 550,
-            stddev = 10,
-            rounds = 10,
-            unit = "s",
+         {
+            name = "short",
+            params = {},
+            stats = {
+               median = 500,
+               mean = 500,
+               min = 450,
+               max = 550,
+               stddev = 10,
+               rounds = 10,
+               unit = "s",
+               rank = 2,
+               ratio = 5,
+            },
          },
       }
-      luamark._internal.rank(results, "median")
 
       local max_width = luamark._internal.DEFAULT_TERM_WIDTH
       for _, fmt in ipairs({ "plain", "compact" }) do
@@ -539,26 +581,37 @@ describe("summarize", function()
 
    test("short names are not truncated", function()
       local results = {
-         fast = {
-            median = 100,
-            mean = 100,
-            min = 90,
-            max = 110,
-            stddev = 5,
-            rounds = 10,
-            unit = "s",
+         {
+            name = "fast",
+            params = {},
+            stats = {
+               median = 100,
+               mean = 100,
+               min = 90,
+               max = 110,
+               stddev = 5,
+               rounds = 10,
+               unit = "s",
+               rank = 1,
+               ratio = 1,
+            },
          },
-         slow = {
-            median = 500,
-            mean = 500,
-            min = 450,
-            max = 550,
-            stddev = 10,
-            rounds = 10,
-            unit = "s",
+         {
+            name = "slow",
+            params = {},
+            stats = {
+               median = 500,
+               mean = 500,
+               min = 450,
+               max = 550,
+               stddev = 10,
+               rounds = 10,
+               unit = "s",
+               rank = 2,
+               ratio = 5,
+            },
          },
       }
-      luamark._internal.rank(results, "median")
 
       for _, fmt in ipairs({ "plain", "compact" }) do
          local output = luamark.summarize(results, fmt)
@@ -570,26 +623,37 @@ describe("summarize", function()
 
    test("csv format outputs comma-separated values", function()
       local results = {
-         fast = {
-            median = 0.001,
-            mean = 0.001,
-            min = 0.0009,
-            max = 0.0011,
-            stddev = 0.00005,
-            rounds = 10,
-            unit = "s",
+         {
+            name = "fast",
+            params = {},
+            stats = {
+               median = 0.001,
+               mean = 0.001,
+               min = 0.0009,
+               max = 0.0011,
+               stddev = 0.00005,
+               rounds = 10,
+               unit = "s",
+               rank = 1,
+               ratio = 1,
+            },
          },
-         slow = {
-            median = 0.003,
-            mean = 0.003,
-            min = 0.0028,
-            max = 0.0032,
-            stddev = 0.0001,
-            rounds = 10,
-            unit = "s",
+         {
+            name = "slow",
+            params = {},
+            stats = {
+               median = 0.003,
+               mean = 0.003,
+               min = 0.0028,
+               max = 0.0032,
+               stddev = 0.0001,
+               rounds = 10,
+               unit = "s",
+               rank = 2,
+               ratio = 3,
+            },
          },
       }
-      luamark._internal.rank(results, "median")
       local output = luamark.summarize(results, "csv")
 
       -- Check header
@@ -771,22 +835,33 @@ describe("unified API", function()
          assert.is_true(seen_n[20])
       end)
 
-      test("returns nested results for single function with params", function()
+      test("returns flat array for single function with params", function()
          local results = luamark.timeit(function() end, {
             params = { n = { 10, 20 } },
             rounds = 1,
          })
 
-         assert.is_not_nil(results.n)
-         assert.is_not_nil(results.n[10])
-         assert.is_not_nil(results.n[20])
-         assert.is_not_nil(results.n[10].median)
+         assert.are_equal(2, #results)
+         -- Find row with n=10
+         local found_10, found_20 = false, false
+         for i = 1, #results do
+            if results[i].params.n == 10 then
+               found_10 = true
+               assert.is_not_nil(results[i].stats.median)
+            elseif results[i].params.n == 20 then
+               found_20 = true
+            end
+         end
+         assert.is_true(found_10)
+         assert.is_true(found_20)
       end)
 
-      test("returns flat Stats when no params", function()
+      test("returns flat array with empty params when no params", function()
          local results = luamark.timeit(function() end, { rounds = 1 })
-         assert.is_not_nil(results.median)
-         assert.is_nil(results.n)
+         assert.are_equal(1, #results)
+         assert.are_equal("1", results[1].name)
+         assert.is_not_nil(results[1].stats.median)
+         assert.same({}, results[1].params)
       end)
 
       test("expands multiple params as cartesian product", function()
@@ -822,7 +897,7 @@ describe("unified API", function()
          assert.are_equal(42, teardown_params.n)
       end)
 
-      test("multiple functions with params return nested results", function()
+      test("multiple functions with params return flat array", function()
          local results = luamark.timeit({
             fast = function() end,
             slow = function() end,
@@ -831,12 +906,19 @@ describe("unified API", function()
             rounds = 1,
          })
 
-         assert.is_not_nil(results.fast)
-         assert.is_not_nil(results.slow)
-         assert.is_not_nil(results.fast.n)
-         assert.is_not_nil(results.fast.n[10])
-         assert.is_not_nil(results.fast.n[20])
-         assert.is_not_nil(results.fast.n[10].median)
+         -- 2 functions × 2 params = 4 rows
+         assert.are_equal(4, #results)
+         local names = {}
+         local params_seen = {}
+         for i = 1, #results do
+            names[results[i].name] = true
+            params_seen[results[i].params.n] = true
+            assert.is_not_nil(results[i].stats.median)
+         end
+         assert.is_true(names.fast)
+         assert.is_true(names.slow)
+         assert.is_true(params_seen[10])
+         assert.is_true(params_seen[20])
       end)
 
       test("memit also supports params", function()
@@ -845,10 +927,18 @@ describe("unified API", function()
             rounds = 1,
          })
 
-         assert.is_not_nil(results.n)
-         assert.is_not_nil(results.n[10])
-         assert.is_not_nil(results.n[20])
-         assert.is_not_nil(results.n[10].median)
+         assert.are_equal(2, #results)
+         local found_10, found_20 = false, false
+         for i = 1, #results do
+            if results[i].params.n == 10 then
+               found_10 = true
+               assert.is_not_nil(results[i].stats.median)
+            elseif results[i].params.n == 20 then
+               found_20 = true
+            end
+         end
+         assert.is_true(found_10)
+         assert.is_true(found_20)
       end)
    end)
 
@@ -873,9 +963,18 @@ describe("unified API", function()
             rounds = 5,
          })
 
-         local rounds = results.test_bench.rounds
-         local iterations = results.test_bench.iterations
-         local warmups = results.test_bench.warmups
+         -- Find the test_bench row
+         local stats
+         for i = 1, #results do
+            if results[i].name == "test_bench" then
+               stats = results[i].stats
+               break
+            end
+         end
+         assert.is_not_nil(stats)
+         local rounds = stats.rounds
+         local iterations = stats.iterations
+         local warmups = stats.warmups
 
          assert.are_equal(1, global_calls)
          -- before_each runs per iteration: at least rounds times (ignoring warmups/calibration)
@@ -1028,7 +1127,8 @@ describe("summarize with unified API results", function()
    test("summarizes single function result (Stats)", function()
       local results = luamark.timeit(function() end, { rounds = 1 })
       local output = luamark.summarize(results, "plain")
-      assert.matches("result", output)
+      -- Single function is named "1", check for data row with name "1"
+      assert.matches("\n1%s+1%s+", output)
       assert.matches("1%.00x", output)
    end)
 
