@@ -17,6 +17,7 @@ local function try_require(clock_module)
    return lib
 end
 
+local allocspy = try_require("allocspy")
 local chronos = try_require("chronos")
 local posix_time = try_require("posix.time")
 local socket = try_require("socket")
@@ -218,10 +219,12 @@ for _, clock_name in ipairs(CLOCKS) do
       -- ----------------------------------------------------------------------------
       -- memit
       -- ----------------------------------------------------------------------------
-      -- For unknown reasons, memory calls are not deterministic on 5.2 and 5.3
 
+      -- Memory measurements have consistent overhead on Lua 5.2, and luacov affects allocations
       local is_jit = type(jit) == "table"
-      if _VERSION ~= "Lua 5.2" and _VERSION ~= "Lua 5.3" and not is_jit then
+      local has_luacov = package.loaded["luacov"] ~= nil or package.loaded["luacov.runner"] ~= nil
+      local skip_memit = _VERSION == "Lua 5.2" or is_jit or has_luacov
+      if not skip_memit then
          describe("memit", function()
             local funcs = {
                noop = noop,
