@@ -3,11 +3,21 @@
   "runtime.version": "Lua 5.1",
   "indent_style": "space",
   "indent_size": "3",
-  "workspace.ignoreDir": [".vscode", "_playground"],
+  "workspace.ignoreDir": [".vscode"],
   "workspace.checkThirdParty": false,
-  "workspace.library": [],
+  "workspace.library": [
+    "${3rd}/luassert/library",
+    "${3rd}/busted/library",
+    "${addons}/argparse/module/library",
+    "${addons}/penlight/module/library"
+  ],
   "diagnostics": {
     "globals": [],
-    "disable": ["lowercase-global", "redefined-local", "undefined-global", "codestyle-check"]
+    "disable": [
+      "lowercase-global",
+      "redefined-local",
+      "undefined-global",
+      "codestyle-check"
+    ]
   }
 }
