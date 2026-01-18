@@ -77,6 +77,7 @@ end
 ---@alias NoArgFun fun()
 ---@alias MeasureOnce fun(fn: NoArgFun):number
 ---@alias Target fun()|{[string]: fun()|Spec} A function or table of named functions/Specs to benchmark.
+---@alias ParamValue string|number|boolean Allowed parameter value types.
 
 ---@type MeasureOnce
 local function measure_time_once(fn)
@@ -242,19 +243,17 @@ local function calculate_stats(samples)
    table.sort(samples)
    local mid = math.floor(count / 2)
    local median
-   if math.fmod(count, 2) == 0 then
+   if count % 2 == 0 then
       median = (samples[mid] + samples[mid + 1]) / 2
    else
       median = samples[mid + 1]
    end
 
+   local min, max = samples[1], samples[count]
+
    local total = 0
-   local min, max = math.huge, -math.huge
    for i = 1, count do
-      local sample = samples[i]
-      total = total + sample
-      min = math.min(sample, min)
-      max = math.max(sample, max)
+      total = total + samples[i]
    end
 
    local mean = total / count
@@ -299,16 +298,17 @@ local function rank(results, key)
       return a.value < b.value
    end)
 
-   local rnk = 1
-   local prev_value
-   local min = ranks[1].value
+   local min_value = ranks[1].value
+   local prev_value = min_value
+   local current_rank = 1
    for i, entry in ipairs(ranks) do
-      if prev_value ~= entry.value then
-         rnk = i
+      if entry.value ~= prev_value then
+         current_rank = i
          prev_value = entry.value
       end
-      results[entry.name].rank = rnk
-      results[entry.name].ratio = (rnk == 1 or min == 0) and 1 or entry.value / min
+      results[entry.name].rank = current_rank
+      results[entry.name].ratio = (current_rank == 1 or min_value == 0) and 1
+         or entry.value / min_value
    end
    return results
 end
@@ -360,7 +360,7 @@ local function humanize(value, base_unit)
    return "0" .. smallest[1]
 end
 
---- Formats statistical measurements into a readable string.
+--- Format statistical measurements into a readable string.
 ---@param stats table The statistical measurements to format.
 ---@param unit default_unit
 ---@return string # A formatted string representing the statistical metrics.
@@ -549,7 +549,6 @@ end
 local function build_table(rows, widths, format)
    local lines = {}
 
-   -- For plain format, compute max ratio and ratio bar column width
    local max_ratio = 1
    local max_ratio_width = 0
    local ratio_bar_width = 0
@@ -559,13 +558,11 @@ local function build_table(rows, widths, format)
          max_ratio = math.max(max_ratio, ratio)
          max_ratio_width = math.max(max_ratio_width, #rows[i].ratio)
       end
-      -- Width: bar + space + ratio + "x"
       ratio_bar_width = EMBEDDED_BAR_WIDTH + 1 + max_ratio_width + 1
    end
 
    local header_cells, underline_cells = {}, {}
    for i, header in ipairs(SUMMARIZE_HEADERS) do
-      -- Replace ratio column with bar+ratio for plain format
       if format == "plain" and header == "ratio" then
          header_cells[#header_cells + 1] = center("Ratio", ratio_bar_width)
          underline_cells[#underline_cells + 1] = string.rep("-", ratio_bar_width)
@@ -581,7 +578,6 @@ local function build_table(rows, widths, format)
       local row = rows[r]
       local cells = {}
       for i, header in ipairs(SUMMARIZE_HEADERS) do
-         -- Replace ratio with bar+ratio for plain format
          if format == "plain" and header == "ratio" then
             local ratio = tonumber(row.ratio) or 1
             local bar_width = math.max(1, math.floor((ratio / max_ratio) * EMBEDDED_BAR_WIDTH))
@@ -616,13 +612,12 @@ end
 
 ---@class BenchmarkRow
 ---@field name string Benchmark name ("1" for unnamed single function).
----@field params table Parameter values for this run.
+---@field params table<string, ParamValue> Parameter values for this run.
 ---@field stats Stats Benchmark statistics.
 
 ---Rank benchmark results within each parameter combination.
 ---@param results BenchmarkRow[]
 local function rank_results(results)
-   -- Group by params key
    local groups = {}
    for i = 1, #results do
       local row = results[i]
@@ -630,7 +625,6 @@ local function rank_results(results)
       groups[key] = groups[key] or {}
       groups[key][#groups[key] + 1] = row
    end
-   -- Rank within each group by median
    for _, group in pairs(groups) do
       table.sort(group, function(a, b)
          return a.stats.median < b.stats.median
@@ -663,7 +657,6 @@ end
 local function build_params_csv(rows)
    local param_names = collect_param_names(rows)
 
-   -- Build header
    local headers = { "name" }
    for i = 1, #param_names do
       headers[#headers + 1] = param_names[i]
@@ -674,7 +667,6 @@ local function build_params_csv(rows)
 
    local lines = { table.concat(headers, ",") }
 
-   -- Sort rows by name, then by params
    table.sort(rows, function(a, b)
       if a.name ~= b.name then
          return a.name < b.name
@@ -682,7 +674,6 @@ local function build_params_csv(rows)
       return format_params(a.params) < format_params(b.params)
    end)
 
-   -- Build data rows
    for i = 1, #rows do
       local row = rows[i]
       local formatted = format_row(row.stats)
@@ -848,11 +839,11 @@ local function validate_benchmark_args(fn, rounds, max_time, setup, teardown, be
    assert(not after or type(after) == "function", "'after' must be a function")
 end
 
----@param samples number[]
----@param rounds integer
----@param iterations integer
----@param timestamp string
----@param unit default_unit
+---@param samples number[] Raw measurement samples.
+---@param rounds integer Number of benchmark rounds executed.
+---@param iterations integer Number of iterations per round.
+---@param timestamp string ISO 8601 UTC timestamp.
+---@param unit default_unit Measurement unit.
 ---@return Stats
 local function build_stats_result(samples, rounds, iterations, timestamp, unit)
    local results = calculate_stats(samples)
@@ -914,7 +905,6 @@ local function single_benchmark(
       ctx = setup(params)
    end
 
-   -- Track iteration context (updated by before each iteration)
    local iteration_ctx = ctx
 
    local bound_fn = function()
@@ -922,9 +912,8 @@ local function single_benchmark(
    end
 
    -- Per-iteration setup: runs global_before then spec_before
-   local iteration_setup
-   if global_before or spec_before then
-      iteration_setup = function()
+   local iteration_setup = (global_before or spec_before)
+      and function()
          -- Reset to global context at start of each iteration
          iteration_ctx = ctx
          if global_before then
@@ -934,12 +923,10 @@ local function single_benchmark(
             iteration_ctx = spec_before(iteration_ctx, params) or iteration_ctx
          end
       end
-   end
 
    -- Per-iteration teardown: runs spec_after then global_after
-   local iteration_teardown
-   if spec_after or global_after then
-      iteration_teardown = function()
+   local iteration_teardown = (spec_after or global_after)
+      and function()
          if spec_after then
             spec_after(iteration_ctx, params)
          end
@@ -947,7 +934,6 @@ local function single_benchmark(
             global_after(iteration_ctx, params)
          end
       end
-   end
 
    local iterations = calibrate_iterations(bound_fn, iteration_setup, iteration_teardown)
    for _ = 1, config.warmups do
@@ -1093,7 +1079,7 @@ end
 ---@field teardown? fun(ctx: any, p: table) Function executed once after benchmark; receives context and params.
 ---@field before? fun(ctx: any, p: table): any Function executed before each iteration; receives context, returns updated context.
 ---@field after? fun(ctx: any, p: table) Function executed after each iteration; receives context and params.
----@field params? table<string, any[]> Parameter combinations to benchmark across.
+---@field params? table<string, ParamValue[]> Parameter combinations to benchmark across.
 
 local VALID_OPTS = {
    rounds = "number",
@@ -1121,18 +1107,14 @@ local function validate_options(opts)
       error("Option 'rounds' must be an integer")
    end
 
-   -- Validate params structure
    if opts.params then
       for name, values in pairs(opts.params) do
-         -- Keys must be strings (prevents table.sort errors on mixed types)
          if type(name) ~= "string" then
             error(string.format("params key must be a string, got %s", type(name)))
          end
-         -- Values must be arrays
          if type(values) ~= "table" then
             error(string.format("params['%s'] must be an array, got %s", name, type(values)))
          end
-         -- Array elements must be valid types
          for i, v in ipairs(values) do
             local vtype = type(v)
             if vtype ~= "string" and vtype ~= "number" and vtype ~= "boolean" then
@@ -1170,7 +1152,6 @@ function luamark.summarize(results, format, max_width)
 
    max_width = max_width or get_term_width()
 
-   -- Check if any row has non-empty params
    local has_params = false
    for i = 1, #results do
       if next(results[i].params) then
@@ -1179,14 +1160,11 @@ function luamark.summarize(results, format, max_width)
       end
    end
 
-   -- CSV format with params needs special handling
    if format == "csv" then
       return build_params_csv(results)
    end
 
-   -- No params: simple table/chart
    if not has_params then
-      -- Convert to {name: Stats} for summarize_benchmark
       local by_name = {}
       for i = 1, #results do
          by_name[results[i].name] = results[i].stats
@@ -1194,7 +1172,6 @@ function luamark.summarize(results, format, max_width)
       return summarize_benchmark(by_name, format, max_width)
    end
 
-   -- With params: group by param combination
    local groups = {} ---@type table<string, {[string]: Stats}>
    for i = 1, #results do
       local row = results[i]
@@ -1203,19 +1180,16 @@ function luamark.summarize(results, format, max_width)
       groups[key][row.name] = row.stats
    end
 
-   -- Build output for each group
    local output = {}
    local group_keys = sorted_keys(groups)
    for i = 1, #group_keys do
       local param_key = group_keys[i]
       local group = groups[param_key]
 
-      -- Add header with params
       if param_key ~= "" then
          output[#output + 1] = param_key
       end
 
-      -- Rank and format this group
       local formatted = summarize_benchmark(group, format, max_width)
       output[#output + 1] = formatted
       output[#output + 1] = "" -- blank line between groups

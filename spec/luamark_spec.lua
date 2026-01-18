@@ -9,11 +9,12 @@ _G._TEST = true
 
 local lua_require = require
 
---- @param clock_module string
---- @return table
-local function try_require(clock_module)
-   local module_installed, lib = pcall(lua_require, clock_module)
-   assert(module_installed, string.format("Dependency '%s' is required for testing.", clock_module))
+--- Require a module, failing the test if not installed.
+---@param module string Module name to require.
+---@return table
+local function try_require(module)
+   local module_installed, lib = pcall(lua_require, module)
+   assert(module_installed, string.format("Dependency '%s' is required for testing.", module))
    return lib
 end
 
@@ -28,8 +29,9 @@ if posix_time.clock_gettime then
    CLOCKS[#CLOCKS + 1] = "posix.time"
 end
 
---- @param clock_module string
---- @return table
+--- Load luamark with a specific clock module, blocking others.
+---@param clock_module string Clock module name to use.
+---@return table
 local function load_luamark(clock_module)
    package.loaded["luamark"] = nil
    for i = 1, #CLOCKS do
@@ -58,12 +60,42 @@ end
 
 local function noop() end
 
---- @param stats table
-local function assert_stats_not_nil(stats)
+--- Assert that a stats table has no nil values.
+---@param stats table Stats table to validate.
+local function assert_stats_valid(stats)
    assert.is_not_nil(stats)
-   for _, stat in pairs(stats) do
-      assert.is_not_nil(stat)
+   for _, value in pairs(stats) do
+      assert.is_not_nil(value)
    end
+end
+
+--- Extract a set of names from benchmark results.
+---@param results table[] Benchmark result rows.
+---@return table<string, boolean>
+local function collect_names(results)
+   local names = {}
+   for i = 1, #results do
+      names[results[i].name] = true
+   end
+   return names
+end
+
+--- Check if results contain rows with specific param values.
+---@param results table[] Benchmark result rows.
+---@param param_name string Parameter name to check.
+---@param expected_values any[] Values that should be present.
+---@return boolean
+local function has_param_values(results, param_name, expected_values)
+   local found = {}
+   for i = 1, #results do
+      found[results[i].params[param_name]] = true
+   end
+   for _, val in ipairs(expected_values) do
+      if not found[val] then
+         return false
+      end
+   end
+   return true
 end
 
 -- ----------------------------------------------------------------------------
@@ -101,20 +133,19 @@ for _, clock_name in ipairs(CLOCKS) do
                local results = benchmark(noop, { rounds = 1 })
                assert.are_equal(1, #results)
                assert.are_equal("1", results[1].name)
-               assert_stats_not_nil(results[1].stats)
+               assert_stats_valid(results[1].stats)
             end)
 
             test("benchmarks multiple functions" .. bench_suffix, function()
                local results = benchmark({ a = noop, b = noop }, { rounds = 1 })
 
                assert.are_equal(2, #results)
-               local names = {}
-               for i = 1, #results do
-                  names[results[i].name] = true
-                  assert_stats_not_nil(results[i].stats)
-               end
+               local names = collect_names(results)
                assert.is_true(names.a)
                assert.is_true(names.b)
+               for i = 1, #results do
+                  assert_stats_valid(results[i].stats)
+               end
             end)
 
             local calls = 0
@@ -845,18 +876,10 @@ describe("unified API", function()
          })
 
          assert.are_equal(2, #results)
-         -- Find row with n=10
-         local found_10, found_20 = false, false
+         assert.is_true(has_param_values(results, "n", { 10, 20 }))
          for i = 1, #results do
-            if results[i].params.n == 10 then
-               found_10 = true
-               assert.is_not_nil(results[i].stats.median)
-            elseif results[i].params.n == 20 then
-               found_20 = true
-            end
+            assert.is_not_nil(results[i].stats.median)
          end
-         assert.is_true(found_10)
-         assert.is_true(found_20)
       end)
 
       test("returns flat array with empty params when no params", function()
@@ -909,19 +932,15 @@ describe("unified API", function()
             rounds = 1,
          })
 
-         -- 2 functions × 2 params = 4 rows
+         -- 2 functions x 2 params = 4 rows
          assert.are_equal(4, #results)
-         local names = {}
-         local params_seen = {}
-         for i = 1, #results do
-            names[results[i].name] = true
-            params_seen[results[i].params.n] = true
-            assert.is_not_nil(results[i].stats.median)
-         end
+         local names = collect_names(results)
          assert.is_true(names.fast)
          assert.is_true(names.slow)
-         assert.is_true(params_seen[10])
-         assert.is_true(params_seen[20])
+         assert.is_true(has_param_values(results, "n", { 10, 20 }))
+         for i = 1, #results do
+            assert.is_not_nil(results[i].stats.median)
+         end
       end)
 
       test("memit also supports params", function()
@@ -931,17 +950,10 @@ describe("unified API", function()
          })
 
          assert.are_equal(2, #results)
-         local found_10, found_20 = false, false
+         assert.is_true(has_param_values(results, "n", { 10, 20 }))
          for i = 1, #results do
-            if results[i].params.n == 10 then
-               found_10 = true
-               assert.is_not_nil(results[i].stats.median)
-            elseif results[i].params.n == 20 then
-               found_20 = true
-            end
+            assert.is_not_nil(results[i].stats.median)
          end
-         assert.is_true(found_10)
-         assert.is_true(found_20)
       end)
    end)
 
