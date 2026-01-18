@@ -82,11 +82,11 @@ Function executed after each iteration. Receives context and params. Runs after 
 ### params
 
 ```lua
-table<string, any[]>?
+table<string, (string|number|boolean)[]>?
 ```
 
 Parameter combinations to benchmark across. Each key is a parameter name, each
-value is an array of values to test.
+value is an array of values to test. Values must be strings, numbers, or booleans.
 
 ```lua
 -- Example: benchmark with different sizes and types
@@ -118,7 +118,7 @@ Both `timeit` and `memit` return `BenchmarkRow[]` - a flat array of benchmark re
 ```lua
 ---@class BenchmarkRow
 ---@field name string Benchmark name ("1" for unnamed single function).
----@field params table Parameter values for this run.
+---@field params table<string, string|number|boolean> Parameter values for this run.
 ---@field stats Stats Benchmark statistics.
 ```
 
