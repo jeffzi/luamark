@@ -1,5 +1,8 @@
 ---@diagnostic disable: undefined-field, unused-local, invisible, different-requires
 
+-- Enable _internal exports for testing (see busted docs on private testing)
+_G._TEST = true
+
 -- ----------------------------------------------------------------------------
 -- Helpers
 -- ----------------------------------------------------------------------------
@@ -164,7 +167,7 @@ for _, clock_name in ipairs(CLOCKS) do
 
                benchmark(
                   counter,
-                  { rounds = 1, before_all = setup_counter, after_all = teardown_counter }
+                  { rounds = 1, setup = setup_counter, teardown = teardown_counter }
                )
                -- Setup and teardown run exactly once per benchmark (not per iteration)
                assert.are_equal(1, setup_calls)
@@ -395,14 +398,14 @@ describe("rank", function()
    test("empty table error", function()
       assert.has.error(function()
          rank({}, "foo")
-      end, "'benchmark_results' is nil or empty.")
+      end, "'results' is nil or empty.")
    end)
 
    test("nil error", function()
       assert.has.error(function()
          ---@diagnostic disable-next-line: param-type-mismatch
          rank(nil, "bar")
-      end, "'benchmark_results' is nil or empty.")
+      end, "'results' is nil or empty.")
    end)
 end)
 
@@ -416,14 +419,14 @@ describe("summarize", function()
    test("empty table error", function()
       assert.has.error(function()
          luamark.summarize({})
-      end, "'benchmark_results' is nil or empty.")
+      end, "'results' is nil or empty.")
    end)
 
    test("nil error", function()
       assert.has.error(function()
          ---@diagnostic disable-next-line: param-type-mismatch
          luamark.summarize(nil)
-      end, "'benchmark_results' is nil or empty.")
+      end, "'results' is nil or empty.")
    end)
 
    test("invalid format error", function()
@@ -667,6 +670,21 @@ describe("config", function()
          luamark.foo = 1
       end, "Invalid config option: foo")
    end)
+
+   test("get_config returns current config values", function()
+      local cfg = luamark.get_config()
+      assert.is_table(cfg)
+      assert.are_equal(luamark.max_iterations, cfg.max_iterations)
+      assert.are_equal(luamark.min_rounds, cfg.min_rounds)
+      assert.are_equal(luamark.max_rounds, cfg.max_rounds)
+      assert.are_equal(luamark.warmups, cfg.warmups)
+   end)
+
+   test("get_config returns a copy", function()
+      local cfg = luamark.get_config()
+      cfg.max_iterations = 999999
+      assert.are_not_equal(999999, luamark.get_config().max_iterations)
+   end)
 end)
 
 -- ----------------------------------------------------------------------------
@@ -686,7 +704,7 @@ describe("unified API", function()
          luamark.timeit(function(ctx)
             received_ctx = ctx
          end, {
-            before_all = function()
+            setup = function()
                return { data = "test_value" }
             end,
             rounds = 1,
@@ -710,7 +728,7 @@ describe("unified API", function()
       test("before_all receives params", function()
          local received_p
          luamark.timeit(function() end, {
-            before_all = function(p)
+            setup = function(p)
                received_p = p
                return {}
             end,
@@ -723,10 +741,10 @@ describe("unified API", function()
       test("after_all receives ctx and params", function()
          local teardown_ctx, teardown_p
          luamark.timeit(function() end, {
-            before_all = function(p)
+            setup = function(p)
                return { value = 42 }
             end,
-            after_all = function(ctx, p)
+            teardown = function(ctx, p)
                teardown_ctx = ctx
                teardown_p = p
             end,
@@ -790,11 +808,11 @@ describe("unified API", function()
          local setup_params, teardown_params
          luamark.timeit(function() end, {
             params = { n = { 42 } },
-            before_all = function(p)
+            setup = function(p)
                setup_params = p
                return {}
             end,
-            after_all = function(ctx, p)
+            teardown = function(ctx, p)
                teardown_params = p
             end,
             rounds = 1,
@@ -842,13 +860,13 @@ describe("unified API", function()
          local results = luamark.timeit({
             test_bench = {
                fn = function() end,
-               before_each = function(ctx, p)
+               before = function(ctx, p)
                   bench_calls = bench_calls + 1
                   return ctx
                end,
             },
          }, {
-            before_all = function(p)
+            setup = function(p)
                global_calls = global_calls + 1
                return { value = 1 }
             end,
@@ -880,12 +898,12 @@ describe("unified API", function()
                fn = function(ctx)
                   final_ctx = ctx
                end,
-               before_each = function(ctx, p)
+               before = function(ctx, p)
                   return { modified = true, original = ctx.original }
                end,
             },
          }, {
-            before_all = function()
+            setup = function()
                return { original = true }
             end,
             rounds = 1,
@@ -900,10 +918,10 @@ describe("unified API", function()
          luamark.timeit({
             test_bench = {
                fn = function() end,
-               before_each = function(ctx, p)
+               before = function(ctx, p)
                   return { iteration_value = 42 }
                end,
-               after_each = function(ctx, p)
+               after = function(ctx, p)
                   teardown_ctx = ctx
                end,
             },
@@ -940,7 +958,7 @@ describe("unified API", function()
          luamark.timeit({
             test_bench = {
                fn = function() end,
-               before_each = function(ctx, p)
+               before = function(ctx, p)
                   received_ctx = ctx
                   return { new = true }
                end,
@@ -957,7 +975,7 @@ describe("unified API", function()
          luamark.timeit({
             test_bench = {
                fn = function() end,
-               before_each = function(ctx, p)
+               before = function(ctx, p)
                   received_param = p.n
                   return ctx
                end,
@@ -977,13 +995,13 @@ describe("unified API", function()
          luamark.memit({
             test_bench = {
                fn = function() end,
-               before_each = function(ctx, p)
+               before = function(ctx, p)
                   bench_calls = bench_calls + 1
                   return ctx
                end,
             },
          }, {
-            before_all = function(p)
+            setup = function(p)
                global_calls = global_calls + 1
                return {}
             end,
