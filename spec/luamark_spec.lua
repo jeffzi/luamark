@@ -147,7 +147,7 @@ for _, clock_name in ipairs(CLOCKS) do
                assert.is_near(expected_max_time, actual_time, 0.3)
             end)
 
-            test("runs setup and teardown" .. bench_suffix, function()
+            test("runs setup and teardown once" .. bench_suffix, function()
                local counter_calls, setup_calls, teardown_calls = 0, 0, 0
 
                local function counter()
@@ -162,13 +162,14 @@ for _, clock_name in ipairs(CLOCKS) do
                   teardown_calls = teardown_calls + 1
                end
 
-               local stats = benchmark(
+               benchmark(
                   counter,
-                  { rounds = 1, setup = setup_counter, teardown = teardown_counter }
+                  { rounds = 1, before_all = setup_counter, after_all = teardown_counter }
                )
-               assert.is_true(setup_calls > 0)
-               assert.is_equals(setup_calls, teardown_calls)
-               assert.is_equals(teardown_calls, counter_calls)
+               -- Setup and teardown run exactly once per benchmark (not per iteration)
+               assert.are_equal(1, setup_calls)
+               assert.are_equal(1, teardown_calls)
+               assert.is_true(counter_calls >= 1)
             end)
          end
       end)
@@ -304,6 +305,18 @@ describe("validation", function()
       assert.has.errors(function()
          ---@diagnostic disable-next-line: param-type-mismatch, missing-parameter
          luamark.memit(nil)
+      end)
+   end)
+
+   test("timeit rejects scalar params value", function()
+      assert.has.errors(function()
+         luamark.timeit(function() end, { params = { n = 10 } })
+      end)
+   end)
+
+   test("memit rejects scalar params value", function()
+      assert.has.errors(function()
+         luamark.memit(function() end, { params = { n = 10 } })
       end)
    end)
 end)
@@ -443,8 +456,8 @@ describe("summarize", function()
       luamark._internal.rank(results, "median")
       local output = luamark.summarize(results, "plain")
       assert.matches("Name", output)
-      assert.matches("fast.*|.*1%.00x", output)
-      assert.matches("slow.*|.*3%.00x", output)
+      assert.matches("fast.*█.*1%.00x", output)
+      assert.matches("slow.*█.*3%.00x", output)
    end)
 
    test("compact format shows only bar chart", function()
@@ -471,8 +484,8 @@ describe("summarize", function()
       luamark._internal.rank(results, "median")
       local output = luamark.summarize(results, "compact")
       assert.not_matches("Name", output)
-      assert.matches("fast.*|.*1%.00x", output)
-      assert.matches("slow.*|.*3%.00x", output)
+      assert.matches("fast.*█.*1%.00x", output)
+      assert.matches("slow.*█.*3%.00x", output)
    end)
 
    test("plain and compact truncate long names to fit terminal width", function()
@@ -599,28 +612,36 @@ describe("calculate_stats", function()
    end)
 end)
 
-describe("format_stat", function()
-   local format_stat
+describe("humanize_time", function()
+   local luamark
 
    setup(function()
-      format_stat = require("luamark")._internal.format_stat
+      luamark = require("luamark")
+   end)
+
+   test("converts seconds to nanoseconds", function()
+      assert.are.equal("5ns", luamark.humanize_time(5 / 1e9))
+   end)
+
+   test("rounds sub-nanosecond to zero", function()
+      assert.are.equal("0ns", luamark.humanize_time(0.5 / 1e9))
+   end)
+end)
+
+describe("humanize_memory", function()
+   local luamark
+
+   setup(function()
+      luamark = require("luamark")
    end)
 
    test("converts kilobytes to terabytes", function()
       local tb, gb = 1024 ^ 3, 1024 ^ 2
-      assert.are.equal("1.5TB", format_stat(tb + 512 * gb, "kb"))
-   end)
-
-   test("converts seconds to nanoseconds", function()
-      assert.are.equal("5ns", format_stat(5 / 1e9, "s"))
-   end)
-
-   test("rounds sub-nanosecond to zero", function()
-      assert.are.equal("0ns", format_stat(0.5 / 1e9, "s"))
+      assert.are.equal("1.5TB", luamark.humanize_memory(tb + 512 * gb))
    end)
 
    test("rounds sub-byte to zero", function()
-      assert.are.equal("0B", format_stat(0.25 / 1024, "kb"))
+      assert.are.equal("0B", luamark.humanize_memory(0.25 / 1024))
    end)
 end)
 
@@ -645,5 +666,462 @@ describe("config", function()
       assert.has.errors(function()
          luamark.foo = 1
       end, "Invalid config option: foo")
+   end)
+end)
+
+-- ----------------------------------------------------------------------------
+-- Unified API
+-- ----------------------------------------------------------------------------
+
+describe("unified API", function()
+   local luamark
+
+   setup(function()
+      luamark = require("luamark")
+   end)
+
+   describe("before_all returns context", function()
+      test("benchmark receives ctx from before_all", function()
+         local received_ctx
+         luamark.timeit(function(ctx)
+            received_ctx = ctx
+         end, {
+            before_all = function()
+               return { data = "test_value" }
+            end,
+            rounds = 1,
+         })
+
+         assert.is_not_nil(received_ctx)
+         assert.are_equal("test_value", received_ctx.data)
+      end)
+
+      test("ctx is nil when no before_all provided", function()
+         local received_ctx = "sentinel"
+         luamark.timeit(function(ctx)
+            received_ctx = ctx
+         end, {
+            rounds = 1,
+         })
+
+         assert.is_nil(received_ctx)
+      end)
+
+      test("before_all receives params", function()
+         local received_p
+         luamark.timeit(function() end, {
+            before_all = function(p)
+               received_p = p
+               return {}
+            end,
+            rounds = 1,
+         })
+
+         assert.is_table(received_p)
+      end)
+
+      test("after_all receives ctx and params", function()
+         local teardown_ctx, teardown_p
+         luamark.timeit(function() end, {
+            before_all = function(p)
+               return { value = 42 }
+            end,
+            after_all = function(ctx, p)
+               teardown_ctx = ctx
+               teardown_p = p
+            end,
+            rounds = 1,
+         })
+
+         assert.is_not_nil(teardown_ctx)
+         assert.are_equal(42, teardown_ctx.value)
+         assert.is_table(teardown_p)
+      end)
+   end)
+
+   describe("params", function()
+      test("accepts params option", function()
+         local seen_n = {}
+         luamark.timeit(function(ctx, p)
+            seen_n[p.n] = true
+         end, {
+            params = { n = { 10, 20 } },
+            rounds = 1,
+         })
+
+         assert.is_true(seen_n[10])
+         assert.is_true(seen_n[20])
+      end)
+
+      test("returns nested results for single function with params", function()
+         local results = luamark.timeit(function() end, {
+            params = { n = { 10, 20 } },
+            rounds = 1,
+         })
+
+         assert.is_not_nil(results.n)
+         assert.is_not_nil(results.n[10])
+         assert.is_not_nil(results.n[20])
+         assert.is_not_nil(results.n[10].median)
+      end)
+
+      test("returns flat Stats when no params", function()
+         local results = luamark.timeit(function() end, { rounds = 1 })
+         assert.is_not_nil(results.median)
+         assert.is_nil(results.n)
+      end)
+
+      test("expands multiple params as cartesian product", function()
+         local seen = {}
+         luamark.timeit(function(ctx, p)
+            seen[p.n .. "_" .. tostring(p.flag)] = true
+         end, {
+            params = { n = { 1, 2 }, flag = { true, false } },
+            rounds = 1,
+         })
+
+         assert.is_true(seen["1_true"])
+         assert.is_true(seen["1_false"])
+         assert.is_true(seen["2_true"])
+         assert.is_true(seen["2_false"])
+      end)
+
+      test("before_all and after_all receive params", function()
+         local setup_params, teardown_params
+         luamark.timeit(function() end, {
+            params = { n = { 42 } },
+            before_all = function(p)
+               setup_params = p
+               return {}
+            end,
+            after_all = function(ctx, p)
+               teardown_params = p
+            end,
+            rounds = 1,
+         })
+
+         assert.are_equal(42, setup_params.n)
+         assert.are_equal(42, teardown_params.n)
+      end)
+
+      test("multiple functions with params return nested results", function()
+         local results = luamark.timeit({
+            fast = function() end,
+            slow = function() end,
+         }, {
+            params = { n = { 10, 20 } },
+            rounds = 1,
+         })
+
+         assert.is_not_nil(results.fast)
+         assert.is_not_nil(results.slow)
+         assert.is_not_nil(results.fast.n)
+         assert.is_not_nil(results.fast.n[10])
+         assert.is_not_nil(results.fast.n[20])
+         assert.is_not_nil(results.fast.n[10].median)
+      end)
+
+      test("memit also supports params", function()
+         local results = luamark.memit(function() end, {
+            params = { n = { 10, 20 } },
+            rounds = 1,
+         })
+
+         assert.is_not_nil(results.n)
+         assert.is_not_nil(results.n[10])
+         assert.is_not_nil(results.n[20])
+         assert.is_not_nil(results.n[10].median)
+      end)
+   end)
+
+   describe("two-level setup", function()
+      test("before_all runs once, before_each runs per iteration", function()
+         local global_calls = 0
+         local bench_calls = 0
+
+         local results = luamark.timeit({
+            test_bench = {
+               fn = function() end,
+               before_each = function(ctx, p)
+                  bench_calls = bench_calls + 1
+                  return ctx
+               end,
+            },
+         }, {
+            before_all = function(p)
+               global_calls = global_calls + 1
+               return { value = 1 }
+            end,
+            rounds = 5,
+         })
+
+         local rounds = results.test_bench.rounds
+         local iterations = results.test_bench.iterations
+         local warmups = results.test_bench.warmups
+
+         assert.are_equal(1, global_calls)
+         -- before_each runs per iteration: at least rounds times (ignoring warmups/calibration)
+         assert.is_true(
+            bench_calls >= rounds,
+            string.format(
+               "bench_calls=%d should be >= rounds=%d (iterations=%d, warmups=%d)",
+               bench_calls,
+               rounds,
+               iterations,
+               warmups
+            )
+         )
+      end)
+
+      test("before_each receives ctx and can modify it", function()
+         local final_ctx
+         luamark.timeit({
+            test_bench = {
+               fn = function(ctx)
+                  final_ctx = ctx
+               end,
+               before_each = function(ctx, p)
+                  return { modified = true, original = ctx.original }
+               end,
+            },
+         }, {
+            before_all = function()
+               return { original = true }
+            end,
+            rounds = 1,
+         })
+
+         assert.is_true(final_ctx.modified)
+         assert.is_true(final_ctx.original)
+      end)
+
+      test("after_each receives iteration_ctx", function()
+         local teardown_ctx
+         luamark.timeit({
+            test_bench = {
+               fn = function() end,
+               before_each = function(ctx, p)
+                  return { iteration_value = 42 }
+               end,
+               after_each = function(ctx, p)
+                  teardown_ctx = ctx
+               end,
+            },
+         }, {
+            rounds = 1,
+         })
+
+         assert.are_equal(42, teardown_ctx.iteration_value)
+      end)
+
+      test("bench functions can be plain functions or tables with fn", function()
+         local plain_called = false
+         local table_called = false
+
+         luamark.timeit({
+            plain = function()
+               plain_called = true
+            end,
+            with_setup = {
+               fn = function()
+                  table_called = true
+               end,
+            },
+         }, {
+            rounds = 1,
+         })
+
+         assert.is_true(plain_called)
+         assert.is_true(table_called)
+      end)
+
+      test("before_each without before_all receives nil ctx", function()
+         local received_ctx = "sentinel"
+         luamark.timeit({
+            test_bench = {
+               fn = function() end,
+               before_each = function(ctx, p)
+                  received_ctx = ctx
+                  return { new = true }
+               end,
+            },
+         }, {
+            rounds = 1,
+         })
+
+         assert.is_nil(received_ctx)
+      end)
+
+      test("before_each receives params", function()
+         local received_param
+         luamark.timeit({
+            test_bench = {
+               fn = function() end,
+               before_each = function(ctx, p)
+                  received_param = p.n
+                  return ctx
+               end,
+            },
+         }, {
+            params = { n = { 42 } },
+            rounds = 1,
+         })
+
+         assert.are_equal(42, received_param)
+      end)
+
+      test("two-level setup works with memit", function()
+         local global_calls = 0
+         local bench_calls = 0
+
+         luamark.memit({
+            test_bench = {
+               fn = function() end,
+               before_each = function(ctx, p)
+                  bench_calls = bench_calls + 1
+                  return ctx
+               end,
+            },
+         }, {
+            before_all = function(p)
+               global_calls = global_calls + 1
+               return {}
+            end,
+            rounds = 3,
+         })
+
+         assert.are_equal(1, global_calls)
+         assert.is_true(bench_calls >= 3)
+      end)
+   end)
+end)
+
+-- ----------------------------------------------------------------------------
+-- Summarize with unified API results
+-- ----------------------------------------------------------------------------
+
+describe("summarize with unified API results", function()
+   local luamark
+
+   setup(function()
+      luamark = require("luamark")
+   end)
+
+   test("summarizes single function result (Stats)", function()
+      local results = luamark.timeit(function() end, { rounds = 1 })
+      local output = luamark.summarize(results, "plain")
+      assert.matches("result", output)
+      assert.matches("1%.00x", output)
+   end)
+
+   test("summarizes single function with params", function()
+      local results = luamark.timeit(function() end, {
+         params = { n = { 10, 20 } },
+         rounds = 1,
+      })
+
+      local output = luamark.summarize(results, "plain")
+      assert.matches("n=10", output)
+      assert.matches("n=20", output)
+   end)
+
+   test("summarizes multiple functions with params", function()
+      local results = luamark.timeit({
+         fast = function() end,
+         slow = function()
+            for i = 1, 100 do
+               local _ = i
+            end
+         end,
+      }, {
+         params = { n = { 10, 20 } },
+         rounds = 3,
+      })
+
+      local output = luamark.summarize(results, "plain")
+      assert.matches("n=10", output)
+      assert.matches("n=20", output)
+      assert.matches("fast", output)
+      assert.matches("slow", output)
+   end)
+
+   test("csv format includes param columns for single function with params", function()
+      local results = luamark.timeit(function() end, {
+         params = { n = { 10 } },
+         rounds = 1,
+      })
+
+      local output = luamark.summarize(results, "csv")
+      assert.matches("name,n,", output)
+      assert.matches(",10,", output)
+   end)
+
+   test("csv format includes param columns for multiple functions with params", function()
+      local results = luamark.timeit({
+         a = function() end,
+      }, {
+         params = { n = { 10 } },
+         rounds = 1,
+      })
+
+      local output = luamark.summarize(results, "csv")
+      assert.matches("name,n,", output)
+      assert.matches("a,10,", output)
+   end)
+
+   test("ranks within each param group", function()
+      local results = luamark.timeit({
+         fast = function() end,
+         slow = function()
+            for i = 1, 1000 do
+               local _ = i
+            end
+         end,
+      }, {
+         params = { n = { 10 } },
+         rounds = 10,
+      })
+
+      local output = luamark.summarize(results, "plain")
+      -- fast should have rank 1 (appear first in output after param header)
+      assert.matches("n=10", output)
+   end)
+
+   test("handles multiple params as cartesian product", function()
+      local results = luamark.timeit(function() end, {
+         params = { n = { 1, 2 }, flag = { true } },
+         rounds = 1,
+      })
+
+      local output = luamark.summarize(results, "plain")
+      assert.matches("flag=true, n=1", output)
+      assert.matches("flag=true, n=2", output)
+   end)
+
+   test("compact format works with params", function()
+      local results = luamark.timeit({
+         a = function() end,
+         b = function() end,
+      }, {
+         params = { n = { 10 } },
+         rounds = 1,
+      })
+
+      local output = luamark.summarize(results, "compact")
+      assert.matches("n=10", output)
+      assert.matches("1%.00x", output)
+   end)
+
+   test("markdown format works with params", function()
+      local results = luamark.timeit({
+         a = function() end,
+      }, {
+         params = { n = { 10 } },
+         rounds = 1,
+      })
+
+      local output = luamark.summarize(results, "markdown")
+      assert.matches("n=10", output)
+      assert.matches("|", output)
    end)
 end)
