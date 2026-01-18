@@ -337,14 +337,14 @@ end
 
 --- Rank benchmark results by specified key, adding 'rank' and 'ratio' fields.
 --- Smallest value gets rank 1 and ratio 1.0; other ratios are relative to it.
----@param benchmark_results {[string]: Stats} Benchmark results indexed by name.
+---@param results {[string]: Stats} Benchmark results indexed by name.
 ---@param key string Stats field to rank by.
 ---@return {[string]: Stats}
-local function rank(benchmark_results, key)
-   assert(benchmark_results and next(benchmark_results), "'benchmark_results' is nil or empty.")
+local function rank(results, key)
+   assert(results and next(results), "'results' is nil or empty.")
 
    local ranks = {}
-   for benchmark_name, stats in pairs(benchmark_results) do
+   for benchmark_name, stats in pairs(results) do
       table.insert(ranks, { name = benchmark_name, value = stats[key] })
    end
 
@@ -360,10 +360,10 @@ local function rank(benchmark_results, key)
          rnk = i
          prev_value = entry.value
       end
-      benchmark_results[entry.name].rank = rnk
-      benchmark_results[entry.name].ratio = (rnk == 1 or min == 0) and 1 or entry.value / min
+      results[entry.name].rank = rnk
+      results[entry.name].ratio = (rnk == 1 or min == 0) and 1 or entry.value / min
    end
-   return benchmark_results
+   return results
 end
 
 -- ----------------------------------------------------------------------------
@@ -682,7 +682,6 @@ end
 ---@param results table
 ---@return "stats"|"multi"|"params"|"multi_params"
 local function detect_result_type(results)
-   -- Check if it's a Stats object directly
    if results.median then
       return "stats"
    end
@@ -737,7 +736,6 @@ end
 ---@param rows FlatRow[]
 local function traverse_params(tbl, params, name, rows)
    if tbl.median then
-      -- Found Stats
       ---@cast tbl Stats
       rows[#rows + 1] = { name = name, params = params, stats = tbl }
       return
@@ -1001,26 +999,18 @@ end
 ---@param fn any
 ---@param rounds? number
 ---@param max_time? number
----@param before_all? function
----@param after_all? function
----@param before_each? function
----@param after_each? function
-local function validate_benchmark_args(
-   fn,
-   rounds,
-   max_time,
-   before_all,
-   after_all,
-   before_each,
-   after_each
-)
+---@param setup? function
+---@param teardown? function
+---@param before? function
+---@param after? function
+local function validate_benchmark_args(fn, rounds, max_time, setup, teardown, before, after)
    assert(type(fn) == "function", "'fn' must be a function, got " .. type(fn))
    assert(not rounds or rounds > 0, "'rounds' must be > 0.")
    assert(not max_time or max_time > 0, "'max_time' must be > 0.")
-   assert(not before_all or type(before_all) == "function")
-   assert(not after_all or type(after_all) == "function")
-   assert(not before_each or type(before_each) == "function")
-   assert(not after_each or type(after_each) == "function")
+   assert(not setup or type(setup) == "function", "'setup' must be a function")
+   assert(not teardown or type(teardown) == "function", "'teardown' must be a function")
+   assert(not before or type(before) == "function", "'before' must be a function")
+   assert(not after or type(after) == "function", "'after' must be a function")
 end
 
 ---@param samples number[]
@@ -1054,13 +1044,13 @@ end
 ---@param unit default_unit Measurement unit.
 ---@param rounds? number Number of rounds.
 ---@param max_time? number Maximum run time in seconds.
----@param before_all? fun(p: table): any Runs once before benchmark, returns context.
----@param after_all? fun(ctx: any, p: table) Runs once after benchmark.
+---@param setup? fun(p: table): any Runs once before benchmark, returns context.
+---@param teardown? fun(ctx: any, p: table) Runs once after benchmark.
 ---@param params? table Parameter values for this run.
----@param before_each? fun(ctx: any, p: table): any Per-iteration setup, returns iteration context.
----@param after_each? fun(iteration_ctx: any, p: table) Per-iteration teardown.
----@param global_before_each? fun(ctx: any, p: table): any Shared per-iteration setup.
----@param global_after_each? fun(ctx: any, p: table) Shared per-iteration teardown.
+---@param spec_before? fun(ctx: any, p: table): any Per-iteration setup (from Spec), returns iteration context.
+---@param spec_after? fun(iteration_ctx: any, p: table) Per-iteration teardown (from Spec).
+---@param global_before? fun(ctx: any, p: table): any Shared per-iteration setup (from Options).
+---@param global_after? fun(ctx: any, p: table) Shared per-iteration teardown (from Options).
 ---@return Stats
 local function single_benchmark(
    fn,
@@ -1069,58 +1059,57 @@ local function single_benchmark(
    unit,
    rounds,
    max_time,
-   before_all,
-   after_all,
+   setup,
+   teardown,
    params,
-   before_each,
-   after_each,
-   global_before_each,
-   global_after_each
+   spec_before,
+   spec_after,
+   global_before,
+   global_after
 )
-   validate_benchmark_args(fn, rounds, max_time, before_all, after_all, before_each, after_each)
+   validate_benchmark_args(fn, rounds, max_time, setup, teardown, spec_before, spec_after)
    if disable_gc == nil then
       disable_gc = true
    end
 
    params = params or {}
 
-   -- Run before_all once
    local ctx
-   if before_all then
-      ctx = before_all(params)
+   if setup then
+      ctx = setup(params)
    end
 
-   -- Track iteration context (updated by before_each each iteration)
+   -- Track iteration context (updated by before each iteration)
    local iteration_ctx = ctx
 
    local bound_fn = function()
       fn(iteration_ctx, params)
    end
 
-   -- Per-iteration setup: runs global_before_each then before_each
+   -- Per-iteration setup: runs global_before then spec_before
    local iteration_setup
-   if global_before_each or before_each then
+   if global_before or spec_before then
       iteration_setup = function()
          -- Reset to global context at start of each iteration
          iteration_ctx = ctx
-         if global_before_each then
-            iteration_ctx = global_before_each(ctx, params) or ctx
+         if global_before then
+            iteration_ctx = global_before(ctx, params) or ctx
          end
-         if before_each then
-            iteration_ctx = before_each(iteration_ctx, params) or iteration_ctx
+         if spec_before then
+            iteration_ctx = spec_before(iteration_ctx, params) or iteration_ctx
          end
       end
    end
 
-   -- Per-iteration teardown: runs after_each then global_after_each
+   -- Per-iteration teardown: runs spec_after then global_after
    local iteration_teardown
-   if after_each or global_after_each then
+   if spec_after or global_after then
       iteration_teardown = function()
-         if after_each then
-            after_each(iteration_ctx, params)
+         if spec_after then
+            spec_after(iteration_ctx, params)
          end
-         if global_after_each then
-            global_after_each(iteration_ctx, params)
+         if global_after then
+            global_after(iteration_ctx, params)
          end
       end
    end
@@ -1161,9 +1150,8 @@ local function single_benchmark(
 
    collectgarbage("restart")
 
-   -- Run after_all once
-   if after_all then
-      after_all(ctx, params)
+   if teardown then
+      teardown(ctx, params)
    end
 
    return build_stats_result(samples, completed_rounds, iterations, timestamp, unit)
@@ -1171,32 +1159,26 @@ end
 
 --- Per-function benchmark specification with optional lifecycle hooks.
 --- Use when comparing functions that need different setup/teardown.
---- Unlike Options.before_all/after_all (run once), Spec hooks run each iteration.
+--- Unlike Options.setup/teardown (run once), Spec hooks run each iteration.
 ---@class Spec
 ---@field fn fun(ctx: any, p: table) Benchmark function; receives iteration context and params.
----@field before_each? fun(ctx: any, p: table): any Per-iteration setup; returns iteration context.
----@field after_each? fun(ctx: any, p: table) Per-iteration teardown.
+---@field before? fun(ctx: any, p: table): any Per-iteration setup; returns iteration context.
+---@field after? fun(ctx: any, p: table) Per-iteration teardown.
 
 --- Parse a benchmark specification into its components.
 ---@param spec function|Spec Function or Spec table.
 ---@return function fn Benchmark function.
----@return function? before_each Per-iteration setup.
----@return function? after_each Per-iteration teardown.
+---@return function? before Per-iteration setup.
+---@return function? after Per-iteration teardown.
 local function parse_spec(spec)
    if type(spec) == "function" then
       return spec, nil, nil
    end
    assert(type(spec) == "table", "spec must be a function or table")
    assert(type(spec.fn) == "function", "spec.fn must be a function")
-   assert(
-      not spec.before_each or type(spec.before_each) == "function",
-      "spec.before_each must be a function"
-   )
-   assert(
-      not spec.after_each or type(spec.after_each) == "function",
-      "spec.after_each must be a function"
-   )
-   return spec.fn, spec.before_each, spec.after_each
+   assert(not spec.before or type(spec.before) == "function", "spec.before must be a function")
+   assert(not spec.after or type(spec.after) == "function", "spec.after must be a function")
+   return spec.fn, spec.before, spec.after
 end
 
 ---@param target Target
@@ -1222,13 +1204,13 @@ local function benchmark(target, measure, disable_gc, unit, opts)
          unit,
          opts.rounds,
          opts.max_time,
-         opts.before_all,
-         opts.after_all,
+         opts.setup,
+         opts.teardown,
          {}, -- empty params
-         nil, -- no per-function before_each
-         nil, -- no per-function after_each
-         opts.before_each,
-         opts.after_each
+         nil, -- no per-function before
+         nil, -- no per-function after
+         opts.before,
+         opts.after
       )
    end
 
@@ -1244,13 +1226,13 @@ local function benchmark(target, measure, disable_gc, unit, opts)
             unit,
             opts.rounds,
             opts.max_time,
-            opts.before_all,
-            opts.after_all,
+            opts.setup,
+            opts.teardown,
             p,
-            nil, -- no per-function before_each
-            nil, -- no per-function after_each
-            opts.before_each,
-            opts.after_each
+            nil, -- no per-function before
+            nil, -- no per-function after
+            opts.before,
+            opts.after
          )
          set_nested(results, p, stats)
       end
@@ -1261,7 +1243,7 @@ local function benchmark(target, measure, disable_gc, unit, opts)
    if not has_params then
       local results = {}
       for name, spec in pairs(target) do
-         local fn, spec_before_each, spec_after_each = parse_spec(spec)
+         local fn, spec_before, spec_after = parse_spec(spec)
          results[name] = single_benchmark(
             fn,
             measure,
@@ -1269,13 +1251,13 @@ local function benchmark(target, measure, disable_gc, unit, opts)
             unit,
             opts.rounds,
             opts.max_time,
-            opts.before_all,
-            opts.after_all,
+            opts.setup,
+            opts.teardown,
             {},
-            spec_before_each,
-            spec_after_each,
-            opts.before_each,
-            opts.after_each
+            spec_before,
+            spec_after,
+            opts.before,
+            opts.after
          )
       end
       local stats = rank(results, "median")
@@ -1290,7 +1272,7 @@ local function benchmark(target, measure, disable_gc, unit, opts)
    -- Multiple functions with params -> {name: {param: {value: Stats}}}
    local results = {}
    for name, spec in pairs(target) do
-      local fn, spec_before_each, spec_after_each = parse_spec(spec)
+      local fn, spec_before, spec_after = parse_spec(spec)
       results[name] = {}
       for i = 1, #params_list do
          local p = params_list[i]
@@ -1301,13 +1283,13 @@ local function benchmark(target, measure, disable_gc, unit, opts)
             unit,
             opts.rounds,
             opts.max_time,
-            opts.before_all,
-            opts.after_all,
+            opts.setup,
+            opts.teardown,
             p,
-            spec_before_each,
-            spec_after_each,
-            opts.before_each,
-            opts.after_each
+            spec_before,
+            spec_after,
+            opts.before,
+            opts.after
          )
          set_nested(results[name], p, stats)
       end
@@ -1318,24 +1300,24 @@ end
 ---@class Options
 ---@field rounds? integer The number of times to run the benchmark. Defaults to a predetermined number if not provided.
 ---@field max_time? number Maximum run time in seconds. It may be exceeded if test function is very slow.
----@field before_all? fun(p: table): any Function executed once before benchmark; receives params table, returns context passed to fn.
----@field after_all? fun(ctx: any, p: table) Function executed once after benchmark; receives context and params.
----@field before_each? fun(ctx: any, p: table): any Function executed before each iteration; receives context, returns updated context.
----@field after_each? fun(ctx: any, p: table) Function executed after each iteration; receives context and params.
+---@field setup? fun(p: table): any Function executed once before benchmark; receives params table, returns context passed to fn.
+---@field teardown? fun(ctx: any, p: table) Function executed once after benchmark; receives context and params.
+---@field before? fun(ctx: any, p: table): any Function executed before each iteration; receives context, returns updated context.
+---@field after? fun(ctx: any, p: table) Function executed after each iteration; receives context and params.
 ---@field params? table<string, any[]> Parameter combinations to benchmark across.
 
 local VALID_OPTS = {
    rounds = "number",
    max_time = "number",
-   before_all = "function",
-   after_all = "function",
-   before_each = "function",
-   after_each = "function",
+   setup = "function",
+   teardown = "function",
+   before = "function",
+   after = "function",
    params = "table",
 }
 
 ---@param opts Options
-local function check_options(opts)
+local function validate_options(opts)
    for k, v in pairs(opts) do
       local opt_type = VALID_OPTS[k]
       if not opt_type then
@@ -1345,10 +1327,11 @@ local function check_options(opts)
          error(string.format("Option '%s' should be %s", k, opt_type))
       end
    end
-   -- Validate rounds is an integer
+
    if opts.rounds and opts.rounds ~= math.floor(opts.rounds) then
       error("Option 'rounds' must be an integer")
    end
+
    -- Validate params structure
    if opts.params then
       for name, values in pairs(opts.params) do
@@ -1393,7 +1376,7 @@ end
 ---@param max_width? integer Maximum output width (default: terminal width).
 ---@return string
 function luamark.summarize(results, format, max_width)
-   assert(results and next(results), "'benchmark_results' is nil or empty.")
+   assert(results and next(results), "'results' is nil or empty.")
    format = format or "plain"
    assert(
       format == "plain" or format == "compact" or format == "markdown" or format == "csv",
@@ -1426,7 +1409,7 @@ end
 ---@return Stats|table Stats for single function, nested results for params, or table of Stats for multiple functions.
 function luamark.timeit(target, opts)
    opts = opts or {}
-   check_options(opts)
+   validate_options(opts)
    return benchmark(target, measure_time, true, "s", opts)
 end
 
@@ -1436,7 +1419,7 @@ end
 ---@return Stats|table Stats for single function, nested results for params, or table of Stats for multiple functions.
 function luamark.memit(target, opts)
    opts = opts or {}
-   check_options(opts)
+   validate_options(opts)
    return benchmark(target, measure_memory, false, "kb", opts)
 end
 
@@ -1456,16 +1439,29 @@ function luamark.humanize_memory(kb)
    return humanize(kb, "kb")
 end
 
----@package
-luamark._internal = {
-   CALIBRATION_PRECISION = CALIBRATION_PRECISION,
-   DEFAULT_TERM_WIDTH = DEFAULT_TERM_WIDTH,
-   calculate_stats = calculate_stats,
-   get_min_clocktime = get_min_clocktime,
-   measure_memory = measure_memory,
-   measure_time = measure_time,
-   rank = rank,
-}
+--- Return a copy of the current configuration.
+---@return table
+function luamark.get_config()
+   return {
+      max_iterations = config.max_iterations,
+      min_rounds = config.min_rounds,
+      max_rounds = config.max_rounds,
+      warmups = config.warmups,
+   }
+end
+
+if rawget(_G, "_TEST") then
+   ---@package
+   luamark._internal = {
+      CALIBRATION_PRECISION = CALIBRATION_PRECISION,
+      DEFAULT_TERM_WIDTH = DEFAULT_TERM_WIDTH,
+      calculate_stats = calculate_stats,
+      get_min_clocktime = get_min_clocktime,
+      measure_memory = measure_memory,
+      measure_time = measure_time,
+      rank = rank,
+   }
+end
 
 return setmetatable(luamark, {
    __index = config,
