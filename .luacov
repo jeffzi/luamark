@@ -1,0 +1,4 @@
+modules = {
+   ["luamark"] = "src/luamark.lua",
+   ["luamark.*"] = "src",
+}
