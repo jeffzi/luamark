@@ -454,10 +454,11 @@ local function truncate_name(name, max_len)
    return name:sub(1, max_len - #ELLIPSIS) .. ELLIPSIS
 end
 
+---Render compact bar chart.
 ---@param rows {name: string, ratio: string, median: string}[]
 ---@param max_width? integer
 ---@return string[]
-local function build_bar_chart(rows, max_width)
+local function render_bar_chart(rows, max_width)
    max_width = max_width or get_term_width()
 
    local max_ratio = 1
@@ -515,18 +516,43 @@ local SUMMARIZE_HEADERS = {
    "rounds",
 }
 
+---Calculate column widths based on header and row content.
 ---@param rows table[]
----@return string
-local function build_csv(rows)
-   local lines = { table.concat(SUMMARIZE_HEADERS, ",") }
-   for _, row in ipairs(rows) do
-      local cells = {}
-      for i, header in ipairs(SUMMARIZE_HEADERS) do
-         cells[i] = escape_csv(row[header] or "")
+---@return integer[]
+local function calculate_column_widths(rows)
+   local widths = {}
+   for i = 1, #SUMMARIZE_HEADERS do
+      local header = SUMMARIZE_HEADERS[i]
+      widths[i] = #header
+      for j = 1, #rows do
+         widths[i] = math.max(widths[i], #(rows[j][header] or ""))
       end
-      lines[#lines + 1] = table.concat(cells, ",")
    end
-   return table.concat(lines, "\n")
+   return widths
+end
+
+---Truncate names to fit within terminal width (for plain format).
+---Mutates rows and widths in place.
+---@param rows table[]
+---@param widths integer[]
+---@param max_width integer
+local function truncate_names_to_fit(rows, widths, max_width)
+   local other_width = 0
+   for i = 2, #SUMMARIZE_HEADERS do
+      other_width = other_width + widths[i]
+   end
+   -- Account for embedded bar column and spacing between columns
+   local bar_col_width = EMBEDDED_BAR_WIDTH + 2
+   local max_name = math.max(
+      NAME_MIN_WIDTH,
+      max_width - other_width - (#SUMMARIZE_HEADERS - 1) * 2 - bar_col_width
+   )
+   if widths[1] > max_name then
+      widths[1] = max_name
+      for i = 1, #rows do
+         rows[i].name = truncate_name(rows[i].name, max_name)
+      end
+   end
 end
 
 ---Build combined bar + ratio label (e.g., "█████ 1.00x")
@@ -542,28 +568,25 @@ local function build_ratio_bar(ratio_str, bar_width, max_ratio_width)
    return padded_bar .. " " .. padded_ratio .. "x"
 end
 
+---Render plain text table with embedded bar chart in ratio column.
 ---@param rows table[]
 ---@param widths integer[]
----@param format "plain"|"compact"|"markdown"
----@return string[]
-local function build_table(rows, widths, format)
+---@return string
+local function render_plain_table(rows, widths)
    local lines = {}
 
    local max_ratio = 1
    local max_ratio_width = 0
-   local ratio_bar_width = 0
-   if format == "plain" then
-      for i = 1, #rows do
-         local ratio = tonumber(rows[i].ratio) or 1
-         max_ratio = math.max(max_ratio, ratio)
-         max_ratio_width = math.max(max_ratio_width, #rows[i].ratio)
-      end
-      ratio_bar_width = EMBEDDED_BAR_WIDTH + 1 + max_ratio_width + 1
+   for i = 1, #rows do
+      local ratio = tonumber(rows[i].ratio) or 1
+      max_ratio = math.max(max_ratio, ratio)
+      max_ratio_width = math.max(max_ratio_width, #rows[i].ratio)
    end
+   local ratio_bar_width = EMBEDDED_BAR_WIDTH + 1 + max_ratio_width + 1
 
    local header_cells, underline_cells = {}, {}
    for i, header in ipairs(SUMMARIZE_HEADERS) do
-      if format == "plain" and header == "ratio" then
+      if header == "ratio" then
          header_cells[#header_cells + 1] = center("Ratio", ratio_bar_width)
          underline_cells[#underline_cells + 1] = string.rep("-", ratio_bar_width)
       else
@@ -571,14 +594,14 @@ local function build_table(rows, widths, format)
          underline_cells[#underline_cells + 1] = string.rep("-", widths[i])
       end
    end
-   lines[1] = concat_line(header_cells, format)
-   lines[2] = concat_line(underline_cells, format)
+   lines[1] = concat_line(header_cells, "plain")
+   lines[2] = concat_line(underline_cells, "plain")
 
    for r = 1, #rows do
       local row = rows[r]
       local cells = {}
       for i, header in ipairs(SUMMARIZE_HEADERS) do
-         if format == "plain" and header == "ratio" then
+         if header == "ratio" then
             local ratio = tonumber(row.ratio) or 1
             local bar_width = math.max(1, math.floor((ratio / max_ratio) * EMBEDDED_BAR_WIDTH))
             cells[#cells + 1] =
@@ -587,10 +610,37 @@ local function build_table(rows, widths, format)
             cells[#cells + 1] = pad(row[header], widths[i])
          end
       end
-      lines[r + 2] = concat_line(cells, format)
+      lines[r + 2] = concat_line(cells, "plain")
    end
 
-   return lines
+   return table.concat(lines, "\n")
+end
+
+---Render markdown table.
+---@param rows table[]
+---@param widths integer[]
+---@return string
+local function render_markdown_table(rows, widths)
+   local lines = {}
+
+   local header_cells, underline_cells = {}, {}
+   for i, header in ipairs(SUMMARIZE_HEADERS) do
+      header_cells[#header_cells + 1] = center(header:gsub("^%l", string.upper), widths[i])
+      underline_cells[#underline_cells + 1] = string.rep("-", widths[i])
+   end
+   lines[1] = concat_line(header_cells, "markdown")
+   lines[2] = concat_line(underline_cells, "markdown")
+
+   for r = 1, #rows do
+      local row = rows[r]
+      local cells = {}
+      for i, header in ipairs(SUMMARIZE_HEADERS) do
+         cells[#cells + 1] = pad(row[header], widths[i])
+      end
+      lines[r + 2] = concat_line(cells, "markdown")
+   end
+
+   return table.concat(lines, "\n")
 end
 
 -- ----------------------------------------------------------------------------
@@ -651,10 +701,10 @@ local function collect_param_names(rows)
    return sorted_keys(seen)
 end
 
----Build CSV output for parameterized results.
+---Render results as CSV with param columns for data export.
 ---@param rows BenchmarkRow[]
 ---@return string
-local function build_params_csv(rows)
+local function render_csv(rows)
    local param_names = collect_param_names(rows)
 
    local headers = { "name" }
@@ -692,12 +742,12 @@ local function build_params_csv(rows)
    return table.concat(lines, "\n")
 end
 
----Summarize a {[string]: Stats} benchmark result (multi without params).
+---Render summary table (plain/compact/markdown).
 ---@param results {[string]: Stats}
----@param format "plain"|"compact"|"markdown"|"csv"
+---@param format "plain"|"compact"|"markdown"
 ---@param max_width? integer
 ---@return string
-local function summarize_benchmark(results, format, max_width)
+local function render_summary(results, format, max_width)
    results = rank(results, "median")
    local rows = {}
    for name, stats in pairs(results) do
@@ -709,48 +759,20 @@ local function summarize_benchmark(results, format, max_width)
       return tonumber(a.rank) < tonumber(b.rank)
    end)
 
-   if format == "csv" then
-      return build_csv(rows)
-   end
-
    max_width = max_width or get_term_width()
 
    if format == "compact" then
-      return table.concat(build_bar_chart(rows, max_width), "\n")
+      return table.concat(render_bar_chart(rows, max_width), "\n")
    end
 
-   local widths = {}
-   for i = 1, #SUMMARIZE_HEADERS do
-      local header = SUMMARIZE_HEADERS[i]
-      widths[i] = #header
-      for j = 1, #rows do
-         widths[i] = math.max(widths[i], #(rows[j][header] or ""))
-      end
-   end
+   local widths = calculate_column_widths(rows)
 
    if format == "plain" then
-      local other_width = 0
-      for i = 2, #SUMMARIZE_HEADERS do
-         other_width = other_width + widths[i]
-      end
-      -- Account for embedded bar column and spacing between columns
-      local bar_col_width = EMBEDDED_BAR_WIDTH + 2
-      local max_name = math.max(
-         NAME_MIN_WIDTH,
-         max_width - other_width - (#SUMMARIZE_HEADERS - 1) * 2 - bar_col_width
-      )
-      if widths[1] > max_name then
-         widths[1] = max_name
-         for i = 1, #rows do
-            rows[i].name = truncate_name(rows[i].name, max_name)
-         end
-      end
+      truncate_names_to_fit(rows, widths, max_width)
+      return render_plain_table(rows, widths)
    end
 
-   ---@cast format "plain"|"compact"|"markdown"
-   local lines = build_table(rows, widths, format)
-
-   return table.concat(lines, "\n")
+   return render_markdown_table(rows, widths)
 end
 
 -- ----------------------------------------------------------------------------
@@ -1160,16 +1182,18 @@ function luamark.summarize(results, format, max_width)
       end
    end
 
+   -- CSV outputs flat data with param columns for export; other formats group by params for display.
    if format == "csv" then
-      return build_params_csv(results)
+      return render_csv(results)
    end
+   ---@cast format "plain"|"compact"|"markdown"
 
    if not has_params then
       local by_name = {}
       for i = 1, #results do
          by_name[results[i].name] = results[i].stats
       end
-      return summarize_benchmark(by_name, format, max_width)
+      return render_summary(by_name, format, max_width)
    end
 
    local groups = {} ---@type table<string, {[string]: Stats}>
@@ -1190,7 +1214,7 @@ function luamark.summarize(results, format, max_width)
          output[#output + 1] = param_key
       end
 
-      local formatted = summarize_benchmark(group, format, max_width)
+      local formatted = render_summary(group, format, max_width)
       output[#output + 1] = formatted
       output[#output + 1] = "" -- blank line between groups
    end
