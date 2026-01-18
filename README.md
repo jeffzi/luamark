@@ -77,10 +77,10 @@ print(type(time_stats))  -- "table"
 -- Or displayed via string conversion
 print(time_stats)
 -- Output:
--- Name  Rank  Ratio  Median   Mean     Min     Max     Stddev   Rounds
--- ----  ----  -----  ------  -------  -----  -------  --------  -------
--- n=1   1     1.00   83ns    68.17ns  1ns    15.75us  83.98ns   1000000
--- n=15  2     4.52   375ns   380.5ns  208ns  21.42us  202.67ns  1000000
+-- Name  Rank      Ratio      Median   Mean     Min    Max      Stddev   Rounds
+-- ----  ----  -------------  ------   ------   -----  -------  -------  ------
+-- n=1   1     ██ 1.00x       83ns     68ns     1ns    15.75us  83ns     100000
+-- n=15  2     ████████ 4.52x 375ns    380ns    208ns  21.42us  202ns    100000
 
 -- Get the summary as a markdown table
 local md = luamark.summarize(time_stats, "markdown")
@@ -91,12 +91,19 @@ local md = luamark.summarize(time_stats, "markdown")
 Measure a single function with custom rounds:
 
 ```lua
+local luamark = require("luamark")
+
+local function factorial(n)
+   if n == 0 then return 1 end
+   return n * factorial(n - 1)
+end
+
 local time_stats = luamark.timeit(function()
    factorial(10)
 end, { rounds = 10 })
 
 print(time_stats)
--- Output: 42ns ± 23ns per round (10 rounds)
+-- Output: 42ns ± 23ns per iteration (10 rounds)
 ```
 
 ### Memory Usage Measurement
@@ -118,6 +125,52 @@ print(type(mem_stats))  -- "table"
 print(mem_stats)
 -- Output: 2.06kB ± 0B per round (533081 rounds)
 ```
+
+### Parameterized Benchmarks
+
+Compare benchmarks across parameter values with setup:
+
+```lua
+local luamark = require("luamark")
+
+-- Compare string concatenation at different sizes
+local results = luamark.timeit({
+   loop = function(ctx, p)
+      local s = ""
+      for i = 1, #ctx.data do s = s .. ctx.data[i] end
+   end,
+   table_concat = function(ctx, p)
+      table.concat(ctx.data)
+   end,
+}, {
+   params = { n = { 10, 100, 1000 } },
+   setup = function(p)
+      local data = {}
+      for i = 1, p.n do data[i] = tostring(i) end
+      return { data = data }
+   end,
+})
+
+-- Display results
+print(luamark.summarize(results, "plain"))
+
+-- Access individual Stats object
+local loop_n100 = nil
+for i = 1, #results do
+   if results[i].name == "loop" and results[i].params.n == 100 then
+      loop_n100 = results[i].stats
+      break
+   end
+end
+print(loop_n100.median)  -- median time in seconds
+```
+
+Key features:
+
+- **Parameter expansion**: Cartesian product of all parameter values
+- **Setup/teardown**: Runs once per parameter combination
+- **Before/after**: Runs before/after each iteration
+- **Flat array results**: All results in `BenchmarkRow[]` format
 
 ## Technical Details
 
