@@ -41,7 +41,7 @@ repos:
       - id: luacheck
 
   - repo: https://github.com/jeffzi/llscheck
-    rev: v0.7.0
+    rev: v0.8.0
     hooks:
       - id: llscheck
         args: ["--checklevel", "Hint"]
