@@ -1,14 +1,15 @@
----@diagnostic disable: undefined-field, unused-local, invisible
+---@diagnostic disable: undefined-field, unused-local, unused-function, invisible
 
 local h = require("tests.helpers")
 
-local function has_param_values(results, param_name, expected_values)
+--- Check if results contain all expected parameter values.
+local function has_all_param_values(results, param_name, expected_values)
    local found = {}
    for i = 1, #results do
       found[results[i].params[param_name]] = true
    end
-   for _, val in ipairs(expected_values) do
-      if not found[val] then
+   for i = 1, #expected_values do
+      if not found[expected_values[i]] then
          return false
       end
    end
@@ -30,13 +31,13 @@ describe("config", function()
    end)
 
    test("rejects invalid config option", function()
-      assert.has.errors(function()
+      assert.has_errors(function()
          luamark.foo = 1
       end, "Invalid config option: foo")
    end)
 
    test("rejects non-number config value", function()
-      assert.has.errors(function()
+      assert.has_errors(function()
          luamark.warmups = "not a number"
       end)
    end)
@@ -144,7 +145,7 @@ describe("API", function()
          })
 
          assert.are_equal(2, #results)
-         assert.is_true(has_param_values(results, "n", { 10, 20 }))
+         assert.is_true(has_all_param_values(results, "n", { 10, 20 }))
          for i = 1, #results do
             assert.is_not_nil(results[i].stats.median)
          end
@@ -208,7 +209,7 @@ describe("API", function()
          end
          assert.is_true(names.fast)
          assert.is_true(names.slow)
-         assert.is_true(has_param_values(results, "n", { 10, 20 }))
+         assert.is_true(has_all_param_values(results, "n", { 10, 20 }))
          for i = 1, #results do
             assert.is_not_nil(results[i].stats.median)
          end
@@ -221,7 +222,7 @@ describe("API", function()
          })
 
          assert.are_equal(2, #results)
-         assert.is_true(has_param_values(results, "n", { 10, 20 }))
+         assert.is_true(has_all_param_values(results, "n", { 10, 20 }))
          for i = 1, #results do
             assert.is_not_nil(results[i].stats.median)
          end
