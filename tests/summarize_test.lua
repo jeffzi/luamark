@@ -2,14 +2,14 @@
 
 local h = require("tests.helpers")
 
---- Create a mock benchmark result row.
+--- Create a mock benchmark result row with stats derived from median.
 ---@param name string
 ---@param median number
----@param rank integer
----@param ratio number
+---@param rank_value integer
+---@param ratio_value number
 ---@param params? table
 ---@return table
-local function make_row(name, median, rank, ratio, params)
+local function make_row(name, median, rank_value, ratio_value, params)
    return {
       name = name,
       params = params or {},
@@ -21,8 +21,8 @@ local function make_row(name, median, rank, ratio, params)
          stddev = median * 0.05,
          rounds = 10,
          unit = "s",
-         rank = rank,
-         ratio = ratio,
+         rank = rank_value,
+         ratio = ratio_value,
       },
    }
 end
@@ -35,20 +35,20 @@ describe("summarize", function()
    end)
 
    test("empty table error", function()
-      assert.has.error(function()
+      assert.has_error(function()
          luamark.summarize({})
       end, "'results' is nil or empty.")
    end)
 
    test("nil error", function()
-      assert.has.error(function()
+      assert.has_error(function()
          ---@diagnostic disable-next-line: param-type-mismatch
          luamark.summarize(nil)
       end, "'results' is nil or empty.")
    end)
 
    test("invalid format error", function()
-      assert.has.error(function()
+      assert.has_error(function()
          luamark.summarize({
             { name = "test", params = {}, stats = { median = 1, unit = "s" } },
          }, "invalid")
@@ -153,11 +153,11 @@ describe("humanize_time", function()
    end)
 
    test("converts seconds to nanoseconds", function()
-      assert.are.equal("5ns", luamark.humanize_time(5 / 1e9))
+      assert.are_equal("5ns", luamark.humanize_time(5 / 1e9))
    end)
 
    test("rounds sub-nanosecond to zero", function()
-      assert.are.equal("0ns", luamark.humanize_time(0.5 / 1e9))
+      assert.are_equal("0ns", luamark.humanize_time(0.5 / 1e9))
    end)
 end)
 
@@ -170,11 +170,11 @@ describe("humanize_memory", function()
 
    test("converts kilobytes to terabytes", function()
       local tb, gb = 1024 ^ 3, 1024 ^ 2
-      assert.are.equal("1.5TB", luamark.humanize_memory(tb + 512 * gb))
+      assert.are_equal("1.5TB", luamark.humanize_memory(tb + 512 * gb))
    end)
 
    test("rounds sub-byte to zero", function()
-      assert.are.equal("0B", luamark.humanize_memory(0.25 / 1024))
+      assert.are_equal("0B", luamark.humanize_memory(0.25 / 1024))
    end)
 end)
 

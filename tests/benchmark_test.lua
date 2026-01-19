@@ -3,14 +3,15 @@
 local h = require("tests.helpers")
 local socket = require("socket")
 
-local SLEEP_TIME = 0.001
+local SLEEP_TIME = 0.01
 local TIME_TOL = SLEEP_TIME / 3
 local MEMORY_TOL = 0.0005
 
+--- Verify all stats fields are non-nil.
 local function assert_stats_valid(stats)
    assert(stats ~= nil, "stats should not be nil")
-   for key, value in pairs(stats) do
-      assert(value ~= nil, string.format("stats.%s should not be nil", key))
+   for field, value in pairs(stats) do
+      assert(value ~= nil, string.format("stats.%s should not be nil", field))
    end
 end
 
@@ -102,28 +103,24 @@ for _, clock_name in ipairs(h.CLOCKS) do
             end)
 
             test("runs setup and teardown once" .. bench_suffix, function()
-               local benchmark = luamark[name]
-               local counter_calls, setup_calls, teardown_calls = 0, 0, 0
+               local bench = luamark[name]
+               local fn_calls, setup_calls, teardown_calls = 0, 0, 0
 
-               local function counter_fn()
-                  counter_calls = counter_calls + 1
-               end
+               bench(function()
+                  fn_calls = fn_calls + 1
+               end, {
+                  rounds = 1,
+                  setup = function()
+                     setup_calls = setup_calls + 1
+                  end,
+                  teardown = function()
+                     teardown_calls = teardown_calls + 1
+                  end,
+               })
 
-               local function setup_counter()
-                  setup_calls = setup_calls + 1
-               end
-
-               local function teardown_counter()
-                  teardown_calls = teardown_calls + 1
-               end
-
-               benchmark(
-                  counter_fn,
-                  { rounds = 1, setup = setup_counter, teardown = teardown_counter }
-               )
                assert.are_equal(1, setup_calls)
                assert.are_equal(1, teardown_calls)
-               assert.is_true(counter_calls >= 1)
+               assert.is_true(fn_calls >= 1)
             end)
          end
       end)
@@ -155,26 +152,20 @@ for _, clock_name in ipairs(h.CLOCKS) do
                local funcs = {
                   noop = h.noop,
                   empty_table = function()
-                     local t = {}
-                     t = nil
+                     local _ = {}
                   end,
                   complex = function()
-                     local i = 1
-                     local t = { 1, 2, 3 }
-                     local s = "luamark"
-                     t = nil
+                     local _ = { 1, 2, 3 }
+                     local _ = "luamark"
                   end,
                }
-               local all_results = luamark.memit(funcs, { rounds = 100 })
+               local results = luamark.memit(funcs, { rounds = 100 })
 
-               for i = 1, #all_results do
-                  local row = all_results[i]
-                  local func_name = row.name
-                  local stats = row.stats
-                  local single_call_memory = luamark._internal.measure_memory(funcs[func_name], 1)
-
-                  assert.near(single_call_memory, stats.mean, MEMORY_TOL)
-                  assert.near(single_call_memory, stats.median, MEMORY_TOL)
+               for i = 1, #results do
+                  local row = results[i]
+                  local single_call_memory = luamark._internal.measure_memory(funcs[row.name], 1)
+                  assert.near(single_call_memory, row.stats.mean, MEMORY_TOL)
+                  assert.near(single_call_memory, row.stats.median, MEMORY_TOL)
                end
             end)
          end)
@@ -190,87 +181,87 @@ describe("validation", function()
    end)
 
    test("timeit rejects negative rounds", function()
-      assert.has.errors(function()
+      assert.has_errors(function()
          luamark.timeit(h.noop, { rounds = -1 })
       end)
    end)
 
    test("memit rejects negative rounds", function()
-      assert.has.errors(function()
+      assert.has_errors(function()
          luamark.memit(h.noop, { rounds = -1 })
       end)
    end)
 
    test("timeit rejects negative max_time", function()
-      assert.has.errors(function()
+      assert.has_errors(function()
          luamark.timeit(h.noop, { max_time = -1 })
       end)
    end)
 
    test("memit rejects negative max_time", function()
-      assert.has.errors(function()
+      assert.has_errors(function()
          luamark.memit(h.noop, { max_time = -1 })
       end)
    end)
 
    test("timeit rejects unknown option", function()
-      assert.has.errors(function()
+      assert.has_errors(function()
          luamark.timeit(h.noop, { hello = "world" })
       end)
    end)
 
    test("memit rejects unknown option", function()
-      assert.has.errors(function()
+      assert.has_errors(function()
          luamark.memit(h.noop, { hello = "world" })
       end)
    end)
 
    test("timeit rejects nil function", function()
-      assert.has.errors(function()
+      assert.has_errors(function()
          ---@diagnostic disable-next-line: param-type-mismatch, missing-parameter
          luamark.timeit(nil)
       end)
    end)
 
    test("memit rejects nil function", function()
-      assert.has.errors(function()
+      assert.has_errors(function()
          ---@diagnostic disable-next-line: param-type-mismatch, missing-parameter
          luamark.memit(nil)
       end)
    end)
 
    test("timeit rejects scalar params value", function()
-      assert.has.errors(function()
+      assert.has_errors(function()
          luamark.timeit(h.noop, { params = { n = 10 } })
       end)
    end)
 
    test("memit rejects scalar params value", function()
-      assert.has.errors(function()
+      assert.has_errors(function()
          luamark.memit(h.noop, { params = { n = 10 } })
       end)
    end)
 
    test("timeit rejects wrong option type", function()
-      assert.has.errors(function()
+      assert.has_errors(function()
          luamark.timeit(h.noop, { rounds = "not a number" })
       end)
    end)
 
    test("timeit rejects non-integer rounds", function()
-      assert.has.errors(function()
+      assert.has_errors(function()
          luamark.timeit(h.noop, { rounds = 1.5 })
       end)
    end)
 
    test("timeit rejects non-string params key", function()
-      assert.has.errors(function()
+      assert.has_errors(function()
          luamark.timeit(h.noop, { params = { [1] = { "a" } } })
       end)
    end)
 
    test("timeit rejects non-primitive params value", function()
-      assert.has.errors(function()
+      assert.has_errors(function()
          luamark.timeit(h.noop, { params = { n = { {} } } })
       end)
    end)

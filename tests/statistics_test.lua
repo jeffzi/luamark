@@ -3,11 +3,10 @@
 local h = require("tests.helpers")
 
 describe("rank", function()
-   local luamark, rank
+   local rank
 
    setup(function()
-      luamark = h.load_luamark()
-      rank = luamark._internal.rank
+      rank = h.load_luamark()._internal.rank
    end)
 
    test("handles zero minimum value", function()
@@ -16,9 +15,9 @@ describe("rank", function()
          test2 = { mean = 10 },
       }
       rank(data, "mean")
-      assert.are.equal(1, data.test1.rank)
-      assert.are.equal(2, data.test2.rank)
-      assert.are.equal(1, data.test1.ratio)
+      assert.are_equal(1, data.test1.rank)
+      assert.are_equal(2, data.test2.rank)
+      assert.are_equal(1, data.test1.ratio)
       assert.is_true(data.test2.ratio < math.huge)
       assert.are_equal(data.test2.ratio, data.test2.ratio) -- not NaN
    end)
@@ -31,10 +30,10 @@ describe("rank", function()
          test4 = { mean = 12 },
       }
       rank(data, "mean")
-      assert.are.same({ rank = 1, mean = 5, ratio = 1 }, data.test3)
-      assert.are.same({ rank = 2, mean = 8, ratio = 1.6 }, data.test1)
-      assert.are.same({ rank = 3, mean = 12, ratio = 2.4 }, data.test4)
-      assert.are.same({ rank = 4, mean = 20, ratio = 4 }, data.test2)
+      assert.are_same({ rank = 1, mean = 5, ratio = 1 }, data.test3)
+      assert.are_same({ rank = 2, mean = 8, ratio = 1.6 }, data.test1)
+      assert.are_same({ rank = 3, mean = 12, ratio = 2.4 }, data.test4)
+      assert.are_same({ rank = 4, mean = 20, ratio = 4 }, data.test2)
    end)
 
    test("identical values", function()
@@ -45,13 +44,13 @@ describe("rank", function()
       }
       rank(data, "mean")
 
-      assert.are.equal(1, data.test1.rank)
-      assert.are.equal(1, data.test2.rank)
-      assert.are.equal(1, data.test3.rank)
+      assert.are_equal(1, data.test1.rank)
+      assert.are_equal(1, data.test2.rank)
+      assert.are_equal(1, data.test3.rank)
 
-      assert.are.equal(1.0, data.test1.ratio)
-      assert.are.equal(1.0, data.test2.ratio)
-      assert.are.equal(1.0, data.test3.ratio)
+      assert.are_equal(1.0, data.test1.ratio)
+      assert.are_equal(1.0, data.test2.ratio)
+      assert.are_equal(1.0, data.test3.ratio)
    end)
 
    test("ranks by specified key", function()
@@ -60,22 +59,22 @@ describe("rank", function()
          test2 = { mean = 20, median = 8 },
       }
       rank(data, "mean")
-      assert.are.same({ rank = 1, mean = 10, median = 18, ratio = 1 }, data.test1)
-      assert.are.same({ rank = 2, mean = 20, median = 8, ratio = 2 }, data.test2)
+      assert.are_same({ rank = 1, mean = 10, median = 18, ratio = 1 }, data.test1)
+      assert.are_same({ rank = 2, mean = 20, median = 8, ratio = 2 }, data.test2)
 
       rank(data, "median")
-      assert.are.same({ rank = 1, mean = 20, median = 8, ratio = 1.0 }, data.test2)
-      assert.are.same({ rank = 2, mean = 10, median = 18, ratio = 2.25 }, data.test1)
+      assert.are_same({ rank = 1, mean = 20, median = 8, ratio = 1.0 }, data.test2)
+      assert.are_same({ rank = 2, mean = 10, median = 18, ratio = 2.25 }, data.test1)
    end)
 
    test("empty table error", function()
-      assert.has.error(function()
+      assert.has_error(function()
          rank({}, "foo")
       end, "'results' is nil or empty.")
    end)
 
    test("nil error", function()
-      assert.has.error(function()
+      assert.has_error(function()
          ---@diagnostic disable-next-line: param-type-mismatch
          rank(nil, "bar")
       end, "'results' is nil or empty.")
@@ -92,7 +91,7 @@ describe("calculate_stats", function()
    test("handles negative values", function()
       local samples = { -5, -3, -1 }
       local stats = calculate_stats(samples)
-      assert.are.equal(-1, stats.max)
-      assert.are.equal(-5, stats.min)
+      assert.are_equal(-1, stats.max)
+      assert.are_equal(-5, stats.min)
    end)
 end)
