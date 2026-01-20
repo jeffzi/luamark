@@ -185,16 +185,15 @@ describe("summarize with benchmark results", function()
       luamark = h.load_luamark()
    end)
 
-   test("summarizes single function result (Stats)", function()
-      local results = luamark.timeit(h.noop, { rounds = 1 })
+   test("summarizes compare_time result (BenchmarkRow[])", function()
+      local results = luamark.compare_time({ test = h.noop }, { rounds = 1 })
       local output = luamark.summarize(results, "plain")
-      -- Single function is named "1", check for data row with name "1"
-      assert.matches("\n1%s+1%s+", output)
+      assert.matches("test", output)
       assert.matches("1%.00x", output)
    end)
 
-   test("summarizes single function with params", function()
-      local results = luamark.timeit(h.noop, {
+   test("summarizes compare_time with params", function()
+      local results = luamark.compare_time({ test = h.noop }, {
          params = { n = { 10, 20 } },
          rounds = 1,
       })
@@ -205,7 +204,7 @@ describe("summarize with benchmark results", function()
    end)
 
    test("summarizes multiple functions with params", function()
-      local results = luamark.timeit({
+      local results = luamark.compare_time({
          fast = function() end,
          slow = function()
             for i = 1, 100 do
@@ -224,19 +223,19 @@ describe("summarize with benchmark results", function()
       assert.matches("slow", output)
    end)
 
-   test("csv format includes param columns for single function with params", function()
-      local results = luamark.timeit(h.noop, {
+   test("csv format includes param columns with params", function()
+      local results = luamark.compare_time({ test = h.noop }, {
          params = { n = { 10 } },
          rounds = 1,
       })
 
       local output = luamark.summarize(results, "csv")
       assert.matches("name,n,", output)
-      assert.matches(",10,", output)
+      assert.matches("test,10,", output)
    end)
 
    test("csv format includes param columns for multiple functions with params", function()
-      local results = luamark.timeit({
+      local results = luamark.compare_time({
          a = h.noop,
       }, {
          params = { n = { 10 } },
@@ -249,7 +248,7 @@ describe("summarize with benchmark results", function()
    end)
 
    test("ranks within each param group", function()
-      local results = luamark.timeit({
+      local results = luamark.compare_time({
          fast = function() end,
          slow = function()
             for i = 1, 1000 do
@@ -262,12 +261,11 @@ describe("summarize with benchmark results", function()
       })
 
       local output = luamark.summarize(results, "plain")
-      -- fast should have rank 1 (appear first in output after param header)
       assert.matches("n=10", output)
    end)
 
    test("handles multiple params as cartesian product", function()
-      local results = luamark.timeit(h.noop, {
+      local results = luamark.compare_time({ test = h.noop }, {
          params = { n = { 1, 2 }, flag = { true } },
          rounds = 1,
       })
@@ -278,7 +276,7 @@ describe("summarize with benchmark results", function()
    end)
 
    test("compact format works with params", function()
-      local results = luamark.timeit({
+      local results = luamark.compare_time({
          a = h.noop,
          b = h.noop,
       }, {
@@ -292,7 +290,7 @@ describe("summarize with benchmark results", function()
    end)
 
    test("markdown format works with params", function()
-      local results = luamark.timeit({
+      local results = luamark.compare_time({
          a = h.noop,
       }, {
          params = { n = { 10 } },
