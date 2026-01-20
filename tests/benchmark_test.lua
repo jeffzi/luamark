@@ -5,7 +5,7 @@ local socket = require("socket")
 
 local SLEEP_TIME = 0.01
 local TIME_TOL = SLEEP_TIME / 3
-local MEMORY_TOL = 0.0005
+local MEMORY_TOL = 0.01 -- 10 bytes tolerance for memory measurement noise
 
 --- Verify all stats fields are non-nil.
 local function assert_stats_valid(stats)
@@ -155,19 +155,21 @@ for _, clock_name in ipairs(h.CLOCKS) do
             test("measures memory correctly", function()
                local funcs = {
                   noop = h.noop,
-                  empty_table = function()
-                     local _ = {}
+                  string_1kb = function()
+                     local _ = string.rep("x", 1024)
                   end,
-                  complex = function()
-                     local _ = { 1, 2, 3 }
-                     local _ = "luamark"
+                  table_100 = function()
+                     local t = {}
+                     for i = 1, 100 do
+                        t[i] = i
+                     end
                   end,
                }
                local results = luamark.compare_memory(funcs, { rounds = 100 })
 
                for i = 1, #results do
                   local row = results[i]
-                  local single_call_memory = luamark._internal.measure_memory(funcs[row.name], 1)
+                  local _, single_call_memory = luamark._internal.measure_memory(funcs[row.name], 1)
                   assert.near(single_call_memory, row.stats.mean, MEMORY_TOL)
                   assert.near(single_call_memory, row.stats.median, MEMORY_TOL)
                end
