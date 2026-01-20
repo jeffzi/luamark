@@ -117,6 +117,8 @@ function luamark.compare_time(
 
 Compare multiple functions for execution time. Returns ranked results.
 
+**Note:** `funcs` keys must be strings. Arrays are not supported.
+
 ```lua
 local results = luamark.compare_time({
    concat_loop = function(ctx, p)
@@ -145,6 +147,8 @@ function luamark.compare_memory(
 ```
 
 Compare multiple functions for memory usage. Returns ranked results.
+
+**Note:** `funcs` keys must be strings. Arrays are not supported.
 
 ### SuiteOptions
 

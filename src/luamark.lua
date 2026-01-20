@@ -1202,6 +1202,19 @@ local function validate_suite_options(opts)
    end
 end
 
+--- Validate funcs table for suite API (compare_time/compare_memory).
+--- Rejects numeric keys (arrays) since function names must be strings.
+---@param funcs table Table of functions to validate.
+local function validate_funcs(funcs)
+   for key in pairs(funcs) do
+      if type(key) ~= "string" then
+         error(
+            "'funcs' keys must be strings, got " .. type(key) .. ". Use named keys: { name = fn }"
+         )
+      end
+   end
+end
+
 -- ----------------------------------------------------------------------------
 -- Public API
 -- ----------------------------------------------------------------------------
@@ -1330,6 +1343,7 @@ end
 ---@return BenchmarkRow[] Flat array of benchmark results with ranking.
 function luamark.compare_time(funcs, opts)
    assert(type(funcs) == "table", "'funcs' must be a table, got " .. type(funcs))
+   validate_funcs(funcs)
    opts = opts or {}
    validate_suite_options(opts)
    return benchmark_suite(funcs, measure_time, true, "s", opts)
@@ -1342,6 +1356,7 @@ end
 ---@return BenchmarkRow[] Flat array of benchmark results with ranking.
 function luamark.compare_memory(funcs, opts)
    assert(type(funcs) == "table", "'funcs' must be a table, got " .. type(funcs))
+   validate_funcs(funcs)
    opts = opts or {}
    validate_suite_options(opts)
    return benchmark_suite(funcs, measure_memory, false, "kb", opts)
