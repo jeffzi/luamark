@@ -6,22 +6,15 @@
 [![Luarocks](https://img.shields.io/luarocks/v/jeffzi/luamark?label=Luarocks&logo=Lua)](https://luarocks.org/modules/jeffzi/luamark)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-LuaMark is a lightweight, portable microbenchmarking library for the Lua programming
-language. It provides precise measurement of both execution time and memory usage through
-a simple yet powerful interface. Whether you're optimizing performance bottlenecks or
-validating code improvements, LuaMark offers the tools you need with minimal setup overhead.
+LuaMark is a lightweight, portable microbenchmarking library for Lua. It measures
+execution time and memory usage with sensible defaults and optional high-precision clocks.
 
 ## Features
 
-- **Time and Memory Measurement**: High-precision execution timing and memory allocation
-  tracking
-  - Time: Increase timing precision with [Chronos][chronos], [LuaPosix][luaposix], or
-    [LuaSocket][luasocket]
-  - Memory: Enhance allocation tracking accuracy using [AllocSpy][allocspy]
-- **Comprehensive Statistics**: Get detailed performance insights including minimum,
-  maximum, mean, median, and standard deviation
-- **Zero Configuration**: Start benchmarking immediately with sensible defaults while
-  retaining full configurability
+- **Measure time and memory** with optional precision via [Chronos][chronos],
+  [LuaPosix][luaposix], [LuaSocket][luasocket], or [AllocSpy][allocspy]
+- **Statistics**: min, max, mean, median, standard deviation
+- **Ready to use** with sensible defaults
 
 [chronos]: https://github.com/ldrumm/chronos
 [luaposix]: https://github.com/luaposix/luaposix
@@ -30,7 +23,7 @@ validating code improvements, LuaMark offers the tools you need with minimal set
 
 ## Requirements
 
-- Lua 5.1, 5.2, 5.3, 5.4, LuaJIT 2.1 or Luau
+- Lua 5.1, 5.2, 5.3, 5.4, or LuaJIT 2.1
 - Optional: [chronos], [luaposix], or [luasocket] for enhanced timing precision
 - Optional: [AllocSpy][allocspy] for enhanced memory tracking
 
@@ -46,49 +39,18 @@ Alternatively, you can manually include [luamark.lua](src/luamark.lua) in your p
 
 ## Usage
 
-### Basic Time Measurement
+### API Overview
 
-Here's a simple example measuring factorial function performance:
+| Function | Input | Returns | `params` |
+| -------- | ----- | ------- | -------- |
+| `timeit(fn, opts)` | single function | [`Stats`](docs/api.md#stats) | No |
+| `memit(fn, opts)` | single function | [`Stats`](docs/api.md#stats) | No |
+| `compare_time(funcs, opts)` | table of functions | [`BenchmarkRow[]`](docs/api.md#benchmarkrow) | Yes |
+| `compare_memory(funcs, opts)` | table of functions | [`BenchmarkRow[]`](docs/api.md#benchmarkrow) | Yes |
 
-```lua
-local luamark = require("luamark")
+### Single Function
 
-function factorial(n)
-   if n == 0 then
-      return 1
-   else
-      return n * factorial(n - 1)
-   end
-end
-
--- Compare different input sizes
-local time_stats = luamark.timeit({
-   ["n=1"] = function()
-      factorial(1)
-   end,
-   ["n=15"] = function()
-      factorial(15)
-   end,
-})
-
--- Results can be accessed as a table
-print(type(time_stats))  -- "table"
-
--- Or displayed via string conversion
-print(time_stats)
--- Output:
--- Name  Rank      Ratio      Median   Mean     Min    Max      Stddev   Rounds
--- ----  ----  -------------  ------   ------   -----  -------  -------  ------
--- n=1   1     ██ 1.00x       83ns     68ns     1ns    15.75us  83ns     100000
--- n=15  2     ████████ 4.52x 375ns    380ns    208ns  21.42us  202ns    100000
-
--- Get the summary as a markdown table
-local md = luamark.summarize(time_stats, "markdown")
-```
-
-### Single Function Timing
-
-Measure a single function with custom rounds:
+Measure execution time:
 
 ```lua
 local luamark = require("luamark")
@@ -98,43 +60,34 @@ local function factorial(n)
    return n * factorial(n - 1)
 end
 
-local time_stats = luamark.timeit(function()
+local stats = luamark.timeit(function()
    factorial(10)
-end, { rounds = 10 })
-
-print(time_stats)
--- Output: 42ns ± 23ns per iteration (10 rounds)
-```
-
-### Memory Usage Measurement
-
-Track memory allocations:
-
-```lua
-local mem_stats = luamark.memit(function()
-   local tbl = {}
-   for i = 1, 100 do
-      tbl[i] = i
-   end
 end)
 
--- Results can be accessed as a table
-print(type(mem_stats))  -- "table"
-
--- Or displayed via string conversion
-print(mem_stats)
--- Output: 2.06kB ± 0B per round (533081 rounds)
+print(stats)
+-- Output: 31.34ns ± 172.86ns per round (558140 rounds)
 ```
 
-### Parameterized Benchmarks
-
-Compare benchmarks across parameter values with setup:
+Measure memory allocation:
 
 ```lua
 local luamark = require("luamark")
 
--- Compare string concatenation at different sizes
-local results = luamark.timeit({
+local stats = luamark.memit(function()
+   local t = {}
+   for i = 1, 100 do t[i] = i end
+end)
+
+print(stats)
+-- Output: 1.07kB ± 15.86B per round (8876 rounds)
+```
+
+### Comparing Functions
+
+```lua
+local luamark = require("luamark")
+
+local results = luamark.compare_time({
    loop = function(ctx, p)
       local s = ""
       for i = 1, #ctx.data do s = s .. ctx.data[i] end
@@ -143,7 +96,7 @@ local results = luamark.timeit({
       table.concat(ctx.data)
    end,
 }, {
-   params = { n = { 10, 100, 1000 } },
+   params = { n = { 100, 1000 } },
    setup = function(p)
       local data = {}
       for i = 1, p.n do data[i] = tostring(i) end
@@ -151,26 +104,24 @@ local results = luamark.timeit({
    end,
 })
 
--- Display results
-print(luamark.summarize(results, "plain"))
+print(results)  -- compact output
 
--- Access individual Stats object
-local loop_n100 = nil
-for i = 1, #results do
-   if results[i].name == "loop" and results[i].params.n == 100 then
-      loop_n100 = results[i].stats
-      break
-   end
-end
-print(loop_n100.median)  -- median time in seconds
+print(luamark.summarize(results, "plain"))  -- detailed output
 ```
 
-Key features:
+```text
+n=100
+    Name      Rank      Ratio       Median    Mean     Min     Max     Stddev   Rounds
+------------  ----  --------------  ------  --------  -----  -------  --------  -------
+table_concat  1     ██       1.00x  292ns   291.41ns  167ns  50.25us  175.93ns  1000000
+loop          2     ████████ 3.28x  958ns   972.18ns  833ns  89.42us  361.36ns  311688
 
-- **Parameter expansion**: Cartesian product of all parameter values
-- **Setup/teardown**: Runs once per parameter combination
-- **Before/after**: Runs before/after each iteration
-- **Flat array results**: All results in `BenchmarkRow[]` format
+n=1000
+    Name      Rank       Ratio       Median    Mean      Min      Max      Stddev   Rounds
+------------  ----  ---------------  -------  -------  -------  --------  --------  ------
+table_concat  1     █         1.00x  3.92us   4us      3.79us   44.54us   405.89ns  224300
+loop          2     ████████ 13.44x  52.62us  53.93us  52.12us  156.42us  3.11us    17791
+```
 
 ## Technical Details
 
@@ -183,7 +134,7 @@ LuaMark provides several configuration options that can be set globally:
 - `max_rounds`: Maximum number of rounds to run (default: 1e6)
 - `warmups`: Number of warmup rounds before measurement (default: 1)
 
-You can modify these settings directly through the LuaMark instance:
+Modify these settings directly:
 
 ```lua
 local luamark = require("luamark")
@@ -195,70 +146,24 @@ luamark.min_rounds = 1000
 luamark.warmups = 5
 ```
 
-### Understanding Iterations and Rounds
+### Iterations and Rounds
 
-LuaMark uses a two-level measurement system to ensure accurate timing:
+LuaMark runs your code multiple times per round (iterations), then repeats for multiple
+rounds. It computes statistics across rounds, handling clock granularity and filtering
+system noise.
 
-#### How Measurement Works
+### Clock Precision
 
-1. Each measurement consists of multiple rounds
-2. Each round runs the code multiple times (iterations)
-3. The time for each round is divided by the number of iterations to get the average
-   execution time
-4. Statistics are computed across all rounds
+LuaMark selects the best available clock:
 
-For example, with 1000 iterations and 100 rounds:
+| Priority | Module              | Precision   | Notes                  |
+| -------- | ------------------- | ----------- | ---------------------- |
+| 1        | [chronos]           | nanosecond  | recommended            |
+| 2        | [luaposix]          | nanosecond  | not available on macOS |
+| 3        | [luasocket]         | millisecond |                        |
+| 4        | os.clock (built-in) | varies      | fallback               |
 
-- Your code runs 1000 times within each round
-- This process repeats 100 times
-- Total executions = 1000 \* 100 = 100,000 times
-
-This approach solves several problems:
-
-- **Clock Granularity**: By running multiple iterations per round, we can measure very
-  fast operations accurately even with low-precision clocks
-- **Statistical Reliability**: Multiple rounds provide enough data points for meaningful statistics
-- **System Variability**: The two-level structure helps filter out system noise
-
-Configuration example:
-
-```lua
-luamark.timeit(function()
-   -- Your code here
-end, {
-   iterations = 1000,  -- Code executions per round
-   rounds = 100       -- Number of rounds
-})
-```
-
-### Clock Precision Hierarchy
-
-LuaMark automatically selects the best available clock module in this order:
-
-1. **[chronos]**
-
-   - Nanosecond precision
-   - Cross-platform compatibility
-   - Recommended for most use cases
-
-2. **[luaposix]**
-
-   - High precision on supported platforms
-   - Note: Not available on MacOS
-
-3. **[LuaSocket][luasocket]**
-
-   - Fallback option with good precision
-   - Wide platform support
-
-4. **Standard os.clock**
-   - Default fallback
-   - Platform-dependent precision
-
-### Memory Tracking
-
-LuaMark provides built-in Lua memory monitoring and can achieve higher precision through
-[AllocSpy][allocspy] when available.
+For memory, [AllocSpy][allocspy] provides byte-level precision when available.
 
 ## API Documentation
 
@@ -266,8 +171,7 @@ For detailed API information, please refer to the [API Documentation](docs/api.m
 
 ## Contributing
 
-Contributions to LuaMark are welcome and appreciated. Whether you're fixing bugs,
-improving documentation, or proposing new features, your help makes LuaMark better.
+Contributions welcome: bug fixes, documentation, new features.
 
 ## License
 
