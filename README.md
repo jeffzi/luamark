@@ -43,10 +43,10 @@ Alternatively, you can manually include [luamark.lua](src/luamark.lua) in your p
 
 | Function | Input | Returns | `params` |
 | -------- | ----- | ------- | -------- |
-| `timeit(fn, opts)` | single function | [`Stats`](docs/api.md#stats) | No |
-| `memit(fn, opts)` | single function | [`Stats`](docs/api.md#stats) | No |
-| `compare_time(funcs, opts)` | table of functions | [`BenchmarkRow[]`](docs/api.md#benchmarkrow) | Yes |
-| `compare_memory(funcs, opts)` | table of functions | [`BenchmarkRow[]`](docs/api.md#benchmarkrow) | Yes |
+| [`timeit`](docs/api.md#timeit) | single function | [`Stats`](docs/api.md#stats) | No |
+| [`memit`](docs/api.md#memit) | single function | [`Stats`](docs/api.md#stats) | No |
+| [`compare_time`](docs/api.md#compare_time) | table of functions | [`BenchmarkRow[]`](docs/api.md#benchmarkrow) | Yes |
+| [`compare_memory`](docs/api.md#compare_memory) | table of functions | [`BenchmarkRow[]`](docs/api.md#benchmarkrow) | Yes |
 
 ### Single Function
 
