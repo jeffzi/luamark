@@ -74,8 +74,7 @@ if not luamark.clock_name then
    luamark.clock_name = "os.clock"
 end
 
----@alias NoArgFun fun()
----@alias MeasureOnce fun(fn: NoArgFun):number
+---@alias MeasureOnce fun(fn: function, ctx: any, params: table):number
 ---@alias Target fun()|{[string]: fun()|Spec} A function or table of named functions/Specs to benchmark.
 ---@alias ParamValue string|number|boolean Allowed parameter value types.
 
@@ -94,10 +93,12 @@ end
 ---@field after? fun(ctx: any, p: table) Function executed after each iteration.
 ---@field params? table<string, ParamValue[]> Parameter combinations to benchmark across.
 
+-- MeasureOnce functions accept fn, ctx, params to avoid closure overhead.
+-- Calling fn(ctx, params) directly eliminates ~64 byte allocation per call.
 ---@type MeasureOnce
-local function measure_time_once(fn)
+local function measure_time_once(fn, ctx, params)
    local start = clock()
-   fn()
+   fn(ctx, params)
    return clock() - start
 end
 
@@ -106,17 +107,17 @@ local measure_memory_once
 do
    local is_allocspy_installed, allocspy = pcall(require, "allocspy")
    if is_allocspy_installed then
-      measure_memory_once = function(fn)
+      measure_memory_once = function(fn, ctx, params)
          collectgarbage("collect")
          allocspy.enable()
-         fn()
+         fn(ctx, params)
          return allocspy.disable() / BYTES_TO_KB
       end
    else
-      measure_memory_once = function(fn)
+      measure_memory_once = function(fn, ctx, params)
          collectgarbage("collect")
          local start = collectgarbage("count")
-         fn()
+         fn(ctx, params)
          return collectgarbage("count") - start
       end
    end
@@ -217,14 +218,15 @@ local ROUNDING_EPSILON = 0.50000000000008
 ---@param precision number
 ---@return number
 local function math_round(num, precision)
-   local mul = 10 ^ (precision or 0)
+   precision = precision or 0
+   local mul = 10 ^ precision
    local rounded
    if num > 0 then
       rounded = math.floor(num * mul + ROUNDING_EPSILON) / mul
    else
       rounded = math.ceil(num * mul - ROUNDING_EPSILON) / mul
    end
-   return math.max(rounded, 10 ^ -(precision or 0))
+   return math.max(rounded, 10 ^ -precision)
 end
 
 -- ----------------------------------------------------------------------------
@@ -304,19 +306,19 @@ end
 local function rank(results, key)
    assert(results and next(results), "'results' is nil or empty.")
 
-   local ranks = {}
-   for benchmark_name, stats in pairs(results) do
-      ranks[#ranks + 1] = { name = benchmark_name, value = stats[key] }
+   local sorted = {}
+   for name, stats in pairs(results) do
+      sorted[#sorted + 1] = { name = name, value = stats[key] }
    end
 
-   table.sort(ranks, function(a, b)
+   table.sort(sorted, function(a, b)
       return a.value < b.value
    end)
 
-   local min_value = ranks[1].value
+   local min_value = sorted[1].value
    local prev_value = min_value
    local current_rank = 1
-   for i, entry in ipairs(ranks) do
+   for i, entry in ipairs(sorted) do
       if entry.value ~= prev_value then
          current_rank = i
          prev_value = entry.value
@@ -394,15 +396,15 @@ end
 ---@param stats Stats
 ---@return table<string, string>
 local function format_row(stats)
-   local unit = stats.unit
+   local u = stats.unit
    return {
-      rank = tostring(stats.rank),
-      ratio = string.format("%.2f", stats.ratio),
-      median = humanize(stats.median, unit),
-      mean = humanize(stats.mean, unit),
-      min = humanize(stats.min, unit),
-      max = humanize(stats.max, unit),
-      stddev = humanize(stats.stddev, unit),
+      rank = stats.rank and tostring(stats.rank) or "",
+      ratio = stats.ratio and string.format("%.2f", stats.ratio) or "",
+      median = humanize(stats.median, u),
+      mean = humanize(stats.mean, u),
+      min = humanize(stats.min, u),
+      max = humanize(stats.max, u),
+      stddev = humanize(stats.stddev, u),
       rounds = tostring(stats.rounds),
    }
 end
@@ -411,8 +413,7 @@ end
 ---@param width integer
 ---@return string
 local function pad(content, width)
-   local padding = width - string.len(content)
-   return content .. string.rep(" ", padding)
+   return content .. string.rep(" ", width - #content)
 end
 
 ---@param content string
@@ -485,13 +486,8 @@ local function render_bar_chart(rows, max_width)
       local ratio = tonumber(row.ratio) or 1
       local bar_width = math.max(1, math.floor((ratio / max_ratio) * bar_max))
       local name = pad(truncate_name(row.name, name_max), name_max)
-      lines[i] = string.format(
-         "%s  |%s %sx (%s)",
-         name,
-         string.rep(BAR_CHAR, bar_width),
-         row.ratio,
-         row.median
-      )
+      local bar = string.rep(BAR_CHAR, bar_width)
+      lines[i] = string.format("%s  |%s %sx (%s)", name, bar, row.ratio, row.median)
    end
    return lines
 end
@@ -700,7 +696,7 @@ local function render_csv(rows)
       headers[#headers + 1] = param_names[i]
    end
    for i = 2, #SUMMARIZE_HEADERS do
-      headers[#headers + 1] = SUMMARIZE_HEADERS[i]
+      headers[i + #param_names] = SUMMARIZE_HEADERS[i]
    end
 
    -- Sort rows by name then params for consistent output
@@ -773,20 +769,24 @@ end
 -- Benchmark
 -- ----------------------------------------------------------------------------
 
----@alias Measure fun(fn: NoArgFun, iterations: integer, setup?: function, teardown?: function): number, number
+---@alias Measure fun(fn: function, iterations: integer, setup?: function, teardown?: function, get_ctx?: function, params?: table): number, number
 
 ---@param measure_once MeasureOnce
 ---@param precision integer
 ---@return Measure
 local function build_measure(measure_once, precision)
-   return function(fn, iterations, setup, teardown)
+   return function(fn, iterations, setup, teardown, get_ctx, params)
       local total = 0
+      local ctx = get_ctx and get_ctx() or nil
       for _ = 1, iterations do
          if setup then
             setup()
          end
 
-         total = total + measure_once(fn)
+         if get_ctx then
+            ctx = get_ctx()
+         end
+         total = total + measure_once(fn, ctx, params)
 
          if teardown then
             teardown()
@@ -801,26 +801,23 @@ local measure_memory = build_measure(measure_memory_once, MEMORY_PRECISION)
 
 local ZERO_TIME_SCALE = 100
 
----@param fn NoArgFun The function to benchmark.
+---@param fn function The function to benchmark.
 ---@param setup? function Function executed before each iteration.
 ---@param teardown? function Function executed after each iteration.
+---@param get_ctx function Function that returns current iteration context.
+---@param params table Parameter table to pass to fn.
 ---@return integer # Number of iterations per round.
-local function calibrate_iterations(fn, setup, teardown)
+local function calibrate_iterations(fn, setup, teardown, get_ctx, params)
    local min_time = get_min_clocktime() * CALIBRATION_PRECISION
    local iterations = 1
 
    for _ = 1, MAX_CALIBRATION_ATTEMPTS do
-      local total_time = measure_time(fn, iterations, setup, teardown)
+      local total_time = measure_time(fn, iterations, setup, teardown, get_ctx, params)
       if total_time >= min_time then
          break
       end
 
-      local scale
-      if total_time > 0 then
-         scale = min_time / total_time
-      else
-         scale = ZERO_TIME_SCALE
-      end
+      local scale = total_time > 0 and (min_time / total_time) or ZERO_TIME_SCALE
 
       iterations = math.ceil(iterations * scale)
 
@@ -853,7 +850,7 @@ end
 ---@param after? function
 local function validate_benchmark_args(fn, rounds, max_time, setup, teardown, before, after)
    assert(type(fn) == "function", "'fn' must be a function, got " .. type(fn))
-   assert(not rounds or rounds > 0, "'rounds' must be > 0.")
+   assert(rounds == nil or rounds > 0, "'rounds' must be > 0.")
    assert(not max_time or max_time > 0, "'max_time' must be > 0.")
 
    local function_args = { setup = setup, teardown = teardown, before = before, after = after }
@@ -887,27 +884,32 @@ local function build_stats_result(samples, rounds, iterations, timestamp, unit)
    return stats
 end
 
+-- Sentinel value to indicate "no context" without using nil.
+-- Required because suite mode needs to distinguish "no ctx passed" from "ctx is nil".
+-- Using varargs with select("#", ...) caused memory allocation overhead.
+local NIL_CTX = {}
+
 --- Create a hook invoker that optionally appends params to all calls.
 --- In single mode: passes ctx only if provided (setup gets no args, others get ctx).
---- In suite mode: passes (params) when no ctx argument, or (ctx, params) otherwise.
+--- In suite mode: passes (params) when ctx is NIL_CTX, or (ctx, params) otherwise.
 ---@param single_mode boolean? When true, calls hooks without params.
 ---@param params table Parameter table to append in suite mode.
 ---@return function invoke Hook invoker function.
 local function make_invoke(single_mode, params)
    if single_mode then
       return function(hook, ctx)
-         if ctx == nil then
+         if not ctx or ctx == NIL_CTX then
             return hook()
          end
          return hook(ctx)
       end
    end
-   -- Suite mode: use varargs to detect if ctx argument was provided
-   return function(hook, ...)
-      if select("#", ...) == 0 then
+   -- Suite mode: use sentinel to detect "no ctx" (avoids varargs allocation overhead)
+   return function(hook, ctx)
+      if ctx == NIL_CTX then
          return hook(params)
       end
-      return hook(..., params)
+      return hook(ctx, params)
    end
 end
 
@@ -944,22 +946,21 @@ local function single_benchmark(
    single_mode
 )
    validate_benchmark_args(fn, rounds, max_time, setup, teardown, spec_before, spec_after)
-   if disable_gc == nil then
-      disable_gc = true
-   end
+   disable_gc = disable_gc ~= false
 
    params = params or {}
    local invoke = make_invoke(single_mode, params)
 
    local ctx
    if setup then
-      ctx = invoke(setup)
+      ctx = invoke(setup, NIL_CTX)
    end
 
    local iteration_ctx = ctx
 
-   local bound_fn = function()
-      invoke(fn, iteration_ctx)
+   -- Indirection avoids creating a new closure per iteration when ctx changes.
+   local function get_ctx()
+      return iteration_ctx
    end
 
    -- Per-iteration setup: runs global_before then spec_before
@@ -985,9 +986,9 @@ local function single_benchmark(
          end
       end
 
-   local iterations = calibrate_iterations(bound_fn, iteration_setup, iteration_teardown)
+   local iterations = calibrate_iterations(fn, iteration_setup, iteration_teardown, get_ctx, params)
    for _ = 1, config.warmups do
-      measure(bound_fn, iterations, iteration_setup, iteration_teardown)
+      measure(fn, iterations, iteration_setup, iteration_teardown, get_ctx, params)
    end
 
    local timestamp = os.date("!%Y-%m-%d %H:%M:%SZ") --[[@as string]]
@@ -1006,7 +1007,7 @@ local function single_benchmark(
          local start = clock()
 
          local _, iteration_measure =
-            measure(bound_fn, iterations, iteration_setup, iteration_teardown)
+            measure(fn, iterations, iteration_setup, iteration_teardown, get_ctx, params)
          samples[completed_rounds] = iteration_measure
 
          duration = clock() - start

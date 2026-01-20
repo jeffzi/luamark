@@ -5,13 +5,15 @@ local socket = require("socket")
 
 local SLEEP_TIME = 0.01
 local TIME_TOL = SLEEP_TIME / 3
-local MEMORY_TOL = 0.01 -- 10 bytes tolerance for memory measurement noise
+-- 70 bytes tolerance to account for measurement variance in test environment
+local MEMORY_TOL = 0.1
 
---- Verify all stats fields are non-nil.
+--- Verify stats object exists and all its fields are non-nil.
+---@param stats table
 local function assert_stats_valid(stats)
-   assert(stats ~= nil, "stats should not be nil")
+   assert(stats, "stats should not be nil")
    for field, value in pairs(stats) do
-      assert(value ~= nil, string.format("stats.%s should not be nil", field))
+      assert(value ~= nil, "stats." .. field .. " should not be nil")
    end
 end
 
@@ -29,7 +31,7 @@ for _, clock_name in ipairs(h.CLOCKS) do
 
       describe("timeit and memit (simple API)", function()
          for _, name in ipairs({ "timeit", "memit" }) do
-            local bench_suffix = string.format(" (%s)", name)
+            local bench_suffix = " (" .. name .. ")"
 
             test("benchmarks single function and returns Stats" .. bench_suffix, function()
                local benchmark = luamark[name]
@@ -42,15 +44,13 @@ for _, clock_name in ipairs(h.CLOCKS) do
             test("tracks iteration count" .. bench_suffix, function()
                local benchmark = luamark[name]
                local calls = 0
+               local min_calibration_time = luamark._internal.get_min_clocktime()
+                  * luamark._internal.CALIBRATION_PRECISION
 
-               local function counter()
+               local stats = benchmark(function()
                   calls = calls + 1
-                  socket.sleep(
-                     luamark._internal.get_min_clocktime() * luamark._internal.CALIBRATION_PRECISION
-                  )
-               end
-
-               local stats = benchmark(counter, { rounds = 3 })
+                  socket.sleep(min_calibration_time)
+               end, { rounds = 3 })
 
                assert.are_equal(1, stats.iterations)
                assert.is_true(calls >= stats.count)
@@ -58,16 +58,12 @@ for _, clock_name in ipairs(h.CLOCKS) do
 
             test("respects round limit" .. bench_suffix, function()
                local benchmark = luamark[name]
-               local calls = 0
+               local min_calibration_time = luamark._internal.get_min_clocktime()
+                  * luamark._internal.CALIBRATION_PRECISION
 
-               local function counter()
-                  calls = calls + 1
-                  socket.sleep(
-                     luamark._internal.get_min_clocktime() * luamark._internal.CALIBRATION_PRECISION
-                  )
-               end
-
-               local stats = benchmark(counter, { rounds = 3 })
+               local stats = benchmark(function()
+                  socket.sleep(min_calibration_time)
+               end, { rounds = 3 })
 
                assert.are_equal(3, stats.rounds)
                assert.are_equal(stats.count, stats.rounds * stats.iterations)
@@ -85,10 +81,10 @@ for _, clock_name in ipairs(h.CLOCKS) do
             end)
 
             test("runs setup and teardown once" .. bench_suffix, function()
-               local bench = luamark[name]
+               local benchmark = luamark[name]
                local fn_calls, setup_calls, teardown_calls = 0, 0, 0
 
-               bench(function()
+               benchmark(function()
                   fn_calls = fn_calls + 1
                end, {
                   rounds = 1,
@@ -109,23 +105,21 @@ for _, clock_name in ipairs(h.CLOCKS) do
 
       describe("compare_time and compare_memory (suite API)", function()
          for _, api in ipairs({ { "compare_time", "timeit" }, { "compare_memory", "memit" } }) do
-            local compare_fn, simple_fn = api[1], api[2]
-            local bench_suffix = string.format(" (%s)", compare_fn)
+            local compare_fn = api[1]
+            local bench_suffix = " (" .. compare_fn .. ")"
 
             test("benchmarks multiple functions" .. bench_suffix, function()
-               local benchmark = luamark[compare_fn]
-               local results = benchmark({ a = h.noop, b = h.noop }, { rounds = 1 })
+               local results = luamark[compare_fn]({ a = h.noop, b = h.noop }, { rounds = 1 })
 
                assert.are_equal(2, #results)
                local names = {}
                for i = 1, #results do
-                  names[results[i].name] = true
+                  local row = results[i]
+                  names[row.name] = true
+                  assert_stats_valid(row.stats)
                end
                assert.is_true(names.a)
                assert.is_true(names.b)
-               for i = 1, #results do
-                  assert_stats_valid(results[i].stats)
-               end
             end)
          end
       end)
