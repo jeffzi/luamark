@@ -79,6 +79,21 @@ end
 ---@alias Target fun()|{[string]: fun()|Spec} A function or table of named functions/Specs to benchmark.
 ---@alias ParamValue string|number|boolean Allowed parameter value types.
 
+---@class Options Benchmark configuration for timeit/memit.
+---@field rounds? integer Number of benchmark rounds.
+---@field max_time? number Maximum run time in seconds.
+---@field setup? fun(): any Function executed once before benchmark; returns context.
+---@field teardown? fun(ctx?: any) Function executed once after benchmark.
+---@field before? fun(ctx?: any): any Function executed before each iteration.
+---@field after? fun(ctx?: any) Function executed after each iteration.
+
+---@class SuiteOptions : Options Configuration for compare_time/compare_memory.
+---@field setup? fun(p: table): any Function executed once before benchmark; receives params, returns context.
+---@field teardown? fun(ctx: any, p: table) Function executed once after benchmark.
+---@field before? fun(ctx: any, p: table): any Function executed before each iteration.
+---@field after? fun(ctx: any, p: table) Function executed after each iteration.
+---@field params? table<string, ParamValue[]> Parameter combinations to benchmark across.
+
 ---@type MeasureOnce
 local function measure_time_once(fn)
    local start = clock()
@@ -291,7 +306,7 @@ local function rank(results, key)
 
    local ranks = {}
    for benchmark_name, stats in pairs(results) do
-      table.insert(ranks, { name = benchmark_name, value = stats[key] })
+      ranks[#ranks + 1] = { name = benchmark_name, value = stats[key] }
    end
 
    table.sort(ranks, function(a, b)
@@ -784,6 +799,8 @@ end
 local measure_time = build_measure(measure_time_once, clock_precision)
 local measure_memory = build_measure(measure_memory_once, MEMORY_PRECISION)
 
+local ZERO_TIME_SCALE = 100
+
 ---@param fn NoArgFun The function to benchmark.
 ---@param setup? function Function executed before each iteration.
 ---@param teardown? function Function executed after each iteration.
@@ -791,9 +808,6 @@ local measure_memory = build_measure(measure_memory_once, MEMORY_PRECISION)
 local function calibrate_iterations(fn, setup, teardown)
    local min_time = get_min_clocktime() * CALIBRATION_PRECISION
    local iterations = 1
-   -- Aggressive scaling factor when total_time is zero (below clock resolution).
-   -- Using 100x reduces calibration rounds for very fast functions.
-   local zero_time_scale = 100
 
    for _ = 1, MAX_CALIBRATION_ATTEMPTS do
       local total_time = measure_time(fn, iterations, setup, teardown)
@@ -805,13 +819,13 @@ local function calibrate_iterations(fn, setup, teardown)
       if total_time > 0 then
          scale = min_time / total_time
       else
-         scale = zero_time_scale
+         scale = ZERO_TIME_SCALE
       end
 
       iterations = math.ceil(iterations * scale)
+
       if iterations >= config.max_iterations then
-         iterations = config.max_iterations
-         break
+         return config.max_iterations
       end
    end
 
@@ -873,20 +887,45 @@ local function build_stats_result(samples, rounds, iterations, timestamp, unit)
    return stats
 end
 
+--- Create a hook invoker that optionally appends params to all calls.
+--- In single mode: passes ctx only if provided (setup gets no args, others get ctx).
+--- In suite mode: passes (params) when no ctx argument, or (ctx, params) otherwise.
+---@param single_mode boolean? When true, calls hooks without params.
+---@param params table Parameter table to append in suite mode.
+---@return function invoke Hook invoker function.
+local function make_invoke(single_mode, params)
+   if single_mode then
+      return function(hook, ctx)
+         if ctx == nil then
+            return hook()
+         end
+         return hook(ctx)
+      end
+   end
+   -- Suite mode: use varargs to detect if ctx argument was provided
+   return function(hook, ...)
+      if select("#", ...) == 0 then
+         return hook(params)
+      end
+      return hook(..., params)
+   end
+end
+
 --- Run a benchmark on a function using a specified measurement method.
----@param fn function Function to benchmark, receives (ctx, params).
+---@param fn function Function to benchmark.
 ---@param measure Measure Measurement function (e.g., measure_time or measure_memory).
 ---@param disable_gc boolean Controls garbage collection during benchmark.
 ---@param unit default_unit Measurement unit.
 ---@param rounds? number Number of rounds.
 ---@param max_time? number Maximum run time in seconds.
----@param setup? fun(p: table): any Runs once before benchmark, returns context.
----@param teardown? fun(ctx: any, p: table) Runs once after benchmark.
----@param params? table Parameter values for this run.
----@param spec_before? fun(ctx: any, p: table): any Per-iteration setup (from Spec), returns iteration context.
----@param spec_after? fun(iteration_ctx: any, p: table) Per-iteration teardown (from Spec).
----@param global_before? fun(ctx: any, p: table): any Shared per-iteration setup (from Options).
----@param global_after? fun(ctx: any, p: table) Shared per-iteration teardown (from Options).
+---@param setup? function Runs once before benchmark, returns context.
+---@param teardown? function Runs once after benchmark.
+---@param params? table Parameter values for this run (nil for single mode).
+---@param spec_before? function Per-iteration setup (from Spec), returns iteration context.
+---@param spec_after? function Per-iteration teardown (from Spec).
+---@param global_before? function Shared per-iteration setup (from Options).
+---@param global_after? function Shared per-iteration teardown (from Options).
+---@param single_mode? boolean When true, hooks receive no params argument.
 ---@return Stats
 local function single_benchmark(
    fn,
@@ -901,7 +940,8 @@ local function single_benchmark(
    spec_before,
    spec_after,
    global_before,
-   global_after
+   global_after,
+   single_mode
 )
    validate_benchmark_args(fn, rounds, max_time, setup, teardown, spec_before, spec_after)
    if disable_gc == nil then
@@ -909,25 +949,28 @@ local function single_benchmark(
    end
 
    params = params or {}
+   local invoke = make_invoke(single_mode, params)
 
-   local ctx = setup and setup(params) or nil
+   local ctx
+   if setup then
+      ctx = invoke(setup)
+   end
 
    local iteration_ctx = ctx
 
    local bound_fn = function()
-      fn(iteration_ctx, params)
+      invoke(fn, iteration_ctx)
    end
 
    -- Per-iteration setup: runs global_before then spec_before
    local iteration_setup = (global_before or spec_before)
       and function()
-         -- Reset to global context at start of each iteration
          iteration_ctx = ctx
          if global_before then
-            iteration_ctx = global_before(ctx, params) or ctx
+            iteration_ctx = invoke(global_before, ctx) or ctx
          end
          if spec_before then
-            iteration_ctx = spec_before(iteration_ctx, params) or iteration_ctx
+            iteration_ctx = invoke(spec_before, iteration_ctx) or iteration_ctx
          end
       end
 
@@ -935,10 +978,10 @@ local function single_benchmark(
    local iteration_teardown = (spec_after or global_after)
       and function()
          if spec_after then
-            spec_after(iteration_ctx, params)
+            invoke(spec_after, iteration_ctx)
          end
          if global_after then
-            global_after(iteration_ctx, params)
+            invoke(global_after, iteration_ctx)
          end
       end
 
@@ -982,9 +1025,8 @@ local function single_benchmark(
    collectgarbage("restart")
 
    if teardown then
-      local teardown_ok, teardown_err = pcall(teardown, ctx, params)
+      local teardown_ok, teardown_err = pcall(invoke, teardown, ctx)
       if not teardown_ok and bench_ok then
-         -- Only propagate teardown error if benchmark succeeded
          error(teardown_err, 0)
       end
    end
@@ -1020,24 +1062,26 @@ local function parse_spec(spec)
    return spec.fn, spec.before, spec.after
 end
 
----@param target Target
----@param measure Measure
----@param disable_gc boolean
----@param unit default_unit
----@param opts Options
+--- Run benchmarks on a table of functions with optional params.
+---@param funcs table<string, function|Spec> Table of named functions or Specs to benchmark.
+---@param measure Measure Measurement function.
+---@param disable_gc boolean Controls garbage collection during benchmark.
+---@param unit default_unit Measurement unit.
+---@param opts SuiteOptions Benchmark options.
 ---@return BenchmarkRow[]
-local function benchmark(target, measure, disable_gc, unit, opts)
+local function benchmark_suite(funcs, measure, disable_gc, unit, opts)
    opts = opts or {}
    local params_list = expand_params(opts.params)
-   local is_single_fn = type(target) == "function"
    local results = {}
 
-   if is_single_fn then
-      ---@cast target function
+   local names = sorted_keys(funcs)
+   for j = 1, #names do
+      local name = names[j]
+      local fn, spec_before, spec_after = parse_spec(funcs[name])
       for i = 1, #params_list do
          local p = params_list[i]
          local stats = single_benchmark(
-            target,
+            fn,
             measure,
             disable_gc,
             unit,
@@ -1046,107 +1090,115 @@ local function benchmark(target, measure, disable_gc, unit, opts)
             opts.setup,
             opts.teardown,
             p,
-            nil,
-            nil,
+            spec_before,
+            spec_after,
             opts.before,
-            opts.after
+            opts.after,
+            false -- suite mode: hooks receive params
          )
-         results[#results + 1] = { name = "1", params = p, stats = stats }
-      end
-   else
-      ---@cast target table
-      local names = sorted_keys(target)
-      for j = 1, #names do
-         local name = names[j]
-         local fn, spec_before, spec_after = parse_spec(target[name])
-         for i = 1, #params_list do
-            local p = params_list[i]
-            local stats = single_benchmark(
-               fn,
-               measure,
-               disable_gc,
-               unit,
-               opts.rounds,
-               opts.max_time,
-               opts.setup,
-               opts.teardown,
-               p,
-               spec_before,
-               spec_after,
-               opts.before,
-               opts.after
-            )
-            results[#results + 1] = { name = name, params = p, stats = stats }
-         end
+         results[#results + 1] = { name = name, params = p, stats = stats }
       end
    end
 
    rank_results(results)
    setmetatable(results, {
       __tostring = function(self)
-         return luamark.summarize(self)
+         return luamark.summarize(self, "compact")
       end,
    })
    return results
 end
 
----@class Options
----@field rounds? integer The number of times to run the benchmark. Defaults to a predetermined number if not provided.
----@field max_time? number Maximum run time in seconds. It may be exceeded if test function is very slow.
----@field setup? fun(p: table): any Function executed once before benchmark; receives params table, returns context passed to fn.
----@field teardown? fun(ctx: any, p: table) Function executed once after benchmark; receives context and params.
----@field before? fun(ctx: any, p: table): any Function executed before each iteration; receives context, returns updated context.
----@field after? fun(ctx: any, p: table) Function executed after each iteration; receives context and params.
----@field params? table<string, ParamValue[]> Parameter combinations to benchmark across.
-
-local VALID_OPTS = {
+local COMMON_OPTS = {
    rounds = "number",
    max_time = "number",
    setup = "function",
    teardown = "function",
    before = "function",
    after = "function",
+}
+
+local SUITE_ONLY_OPTS = {
    params = "table",
 }
 
----@param opts Options
-local function validate_options(opts)
-   for k, v in pairs(opts) do
-      local opt_type = VALID_OPTS[k]
-      if not opt_type then
-         error("Unknown option: " .. k)
+--- Get the expected type for an option, checking common and extra option tables.
+---@param key string Option name.
+---@param extra_opts? table<string, string> Additional valid options.
+---@return string? expected_type Expected type or nil if unknown option.
+local function get_option_type(key, extra_opts)
+   local opt_type = COMMON_OPTS[key]
+   if opt_type then
+      return opt_type
+   end
+   if extra_opts then
+      return extra_opts[key]
+   end
+   return nil
+end
+
+--- Validate options against allowed types.
+---@param opts table Options to validate.
+---@param extra_opts? table<string, string> Additional valid options beyond COMMON_OPTS.
+local function validate_options(opts, extra_opts)
+   for key, value in pairs(opts) do
+      local expected_type = get_option_type(key, extra_opts)
+      if not expected_type then
+         error("Unknown option: " .. key)
       end
-      if type(v) ~= opt_type then
-         error(string.format("Option '%s' should be %s", k, opt_type))
+      if type(value) ~= expected_type then
+         error(string.format("Option '%s' should be %s", key, expected_type))
       end
    end
 
    if opts.rounds and opts.rounds ~= math.floor(opts.rounds) then
       error("Option 'rounds' must be an integer")
    end
+end
 
-   if opts.params then
-      for name, values in pairs(opts.params) do
-         if type(name) ~= "string" then
-            error(string.format("params key must be a string, got %s", type(name)))
-         end
-         if type(values) ~= "table" then
-            error(string.format("params['%s'] must be an array, got %s", name, type(values)))
-         end
-         for i, v in ipairs(values) do
-            local vtype = type(v)
-            if vtype ~= "string" and vtype ~= "number" and vtype ~= "boolean" then
-               error(
-                  string.format(
-                     "params['%s'][%d] must be string, number, or boolean, got %s",
-                     name,
-                     i,
-                     vtype
-                  )
+--- Validate params table structure.
+---@param params table<string, ParamValue[]> Parameter combinations.
+local function validate_params(params)
+   for name, values in pairs(params) do
+      if type(name) ~= "string" then
+         error(string.format("params key must be a string, got %s", type(name)))
+      end
+      if type(values) ~= "table" then
+         error(string.format("params['%s'] must be an array, got %s", name, type(values)))
+      end
+      for i, v in ipairs(values) do
+         local vtype = type(v)
+         if vtype ~= "string" and vtype ~= "number" and vtype ~= "boolean" then
+            error(
+               string.format(
+                  "params['%s'][%d] must be string, number, or boolean, got %s",
+                  name,
+                  i,
+                  vtype
                )
-            end
+            )
          end
       end
+   end
+end
+
+--- Validate options for single API (timeit/memit).
+--- Rejects params option with helpful error message.
+---@param opts Options Options to validate.
+local function validate_single_options(opts)
+   ---@diagnostic disable-next-line: undefined-field
+   if opts.params then
+      error("'params' is not supported in timeit/memit. Use compare_time/compare_memory instead.")
+   end
+   validate_options(opts)
+end
+
+--- Validate options for suite API (compare_time/compare_memory).
+---@param opts SuiteOptions Options to validate.
+local function validate_suite_options(opts)
+   validate_options(opts, SUITE_ONLY_OPTS)
+   if opts.params then
+      validate_params(opts.params)
    end
 end
 
@@ -1217,24 +1269,82 @@ function luamark.summarize(results, format, max_width)
    return table.concat(output, "\n")
 end
 
---- Benchmark a function for execution time. Time is represented in seconds.
----@param target Target Function or table of functions/Specs to benchmark.
+--- Benchmark a single function for execution time.
+--- Time is represented in seconds.
+---@param fn fun(ctx?: any) Function to benchmark; receives context from setup.
 ---@param opts? Options Benchmark configuration.
----@return BenchmarkRow[] Flat array of benchmark results.
-function luamark.timeit(target, opts)
+---@return Stats Benchmark statistics.
+function luamark.timeit(fn, opts)
+   assert(type(fn) == "function", "'fn' must be a function, got " .. type(fn))
    opts = opts or {}
-   validate_options(opts)
-   return benchmark(target, measure_time, true, "s", opts)
+   validate_single_options(opts)
+   return single_benchmark(
+      fn,
+      measure_time,
+      true,
+      "s",
+      opts.rounds,
+      opts.max_time,
+      opts.setup,
+      opts.teardown,
+      nil,
+      nil,
+      nil,
+      opts.before,
+      opts.after,
+      true
+   )
 end
 
---- Benchmark a function for memory usage. Memory is represented in kilobytes.
----@param target Target Function or table of functions/Specs to benchmark.
+--- Benchmark a single function for memory usage.
+--- Memory is represented in kilobytes.
+---@param fn fun(ctx?: any) Function to benchmark; receives context from setup.
 ---@param opts? Options Benchmark configuration.
----@return BenchmarkRow[] Flat array of benchmark results.
-function luamark.memit(target, opts)
+---@return Stats Benchmark statistics.
+function luamark.memit(fn, opts)
+   assert(type(fn) == "function", "'fn' must be a function, got " .. type(fn))
    opts = opts or {}
-   validate_options(opts)
-   return benchmark(target, measure_memory, false, "kb", opts)
+   validate_single_options(opts)
+   return single_benchmark(
+      fn,
+      measure_memory,
+      false,
+      "kb",
+      opts.rounds,
+      opts.max_time,
+      opts.setup,
+      opts.teardown,
+      nil,
+      nil,
+      nil,
+      opts.before,
+      opts.after,
+      true
+   )
+end
+
+--- Compare multiple functions for execution time.
+--- Time is represented in seconds.
+---@param funcs table<string, function|Spec> Table of named functions or Specs to benchmark.
+---@param opts? SuiteOptions Benchmark configuration with optional params.
+---@return BenchmarkRow[] Flat array of benchmark results with ranking.
+function luamark.compare_time(funcs, opts)
+   assert(type(funcs) == "table", "'funcs' must be a table, got " .. type(funcs))
+   opts = opts or {}
+   validate_suite_options(opts)
+   return benchmark_suite(funcs, measure_time, true, "s", opts)
+end
+
+--- Compare multiple functions for memory usage.
+--- Memory is represented in kilobytes.
+---@param funcs table<string, function|Spec> Table of named functions or Specs to benchmark.
+---@param opts? SuiteOptions Benchmark configuration with optional params.
+---@return BenchmarkRow[] Flat array of benchmark results with ranking.
+function luamark.compare_memory(funcs, opts)
+   assert(type(funcs) == "table", "'funcs' must be a table, got " .. type(funcs))
+   opts = opts or {}
+   validate_suite_options(opts)
+   return benchmark_suite(funcs, measure_memory, false, "kb", opts)
 end
 
 --- Format a time value to a human-readable string.
