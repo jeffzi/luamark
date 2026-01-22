@@ -832,7 +832,28 @@ local function build_measure(measure_once, precision)
    end
 end
 
-local measure_time = build_measure(measure_time_once, clock_precision)
+---@param precision integer
+---@return Measure
+local function build_measure_time(precision)
+   local slow_path = build_measure(measure_time_once, precision)
+   return function(fn, iterations, setup, teardown, get_ctx, params)
+      -- Fast path: 2 clock() calls total instead of 2N when no hooks need to run
+      -- between iterations. Reduces timing overhead for fast functions.
+      if not setup and not teardown then
+         local ctx = get_ctx and get_ctx() or nil
+         local t1 = clock()
+         for _ = 1, iterations do
+            fn(ctx, params)
+         end
+         local total = clock() - t1
+         return total, math_round(total / iterations, precision)
+      end
+
+      return slow_path(fn, iterations, setup, teardown, get_ctx, params)
+   end
+end
+
+local measure_time = build_measure_time(clock_precision)
 local measure_memory = build_measure(measure_memory_once, MEMORY_PRECISION)
 
 local ZERO_TIME_SCALE = 100

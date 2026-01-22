@@ -106,20 +106,72 @@ for _, clock_name in ipairs(h.CLOCKS) do
 
       describe("timeit", function()
          test("computes timing stats and ops", function()
-            local calls = 0
             local long_sleep = SLEEP_TIME * 2
+            -- Use setup to reset state before each benchmark run, ensuring
+            -- the long sleep triggers during measurement, not calibration
+            local calls
             local function counter()
                calls = calls + 1
-               socket.sleep(calls == 10 and long_sleep or SLEEP_TIME)
+               socket.sleep(calls == 5 and long_sleep or SLEEP_TIME)
             end
 
-            local stats = luamark.timeit(counter, { rounds = 100, max_time = 1 })
+            local stats = luamark.timeit(counter, {
+               rounds = 100,
+               max_time = 1,
+               setup = function()
+                  calls = 0
+               end,
+            })
 
             assert.is_near(SLEEP_TIME, stats.min, TIME_TOL)
             assert.is_near(long_sleep, stats.max, TIME_TOL * 2)
             assert.is_near(SLEEP_TIME, stats.mean, TIME_TOL)
             assert.is_number(stats.ops)
             assert.is_near(1 / stats.mean, stats.ops, 1e-10)
+         end)
+      end)
+
+      describe("batch timing optimization", function()
+         test("fast path (no hooks) measures time correctly", function()
+            local stats = luamark.timeit(function()
+               socket.sleep(SLEEP_TIME)
+            end, { rounds = 3 })
+
+            assert.is_near(SLEEP_TIME, stats.mean, TIME_TOL)
+         end)
+
+         test("slow path (with before hook) measures time correctly", function()
+            local stats = luamark.timeit(function()
+               socket.sleep(SLEEP_TIME)
+            end, {
+               rounds = 3,
+               before = h.noop,
+            })
+
+            assert.is_near(SLEEP_TIME, stats.mean, TIME_TOL)
+         end)
+
+         test("slow path (with after hook) measures time correctly", function()
+            local stats = luamark.timeit(function()
+               socket.sleep(SLEEP_TIME)
+            end, {
+               rounds = 3,
+               after = h.noop,
+            })
+
+            assert.is_near(SLEEP_TIME, stats.mean, TIME_TOL)
+         end)
+
+         test("fast path has less overhead than slow path", function()
+            local function work()
+               socket.sleep(SLEEP_TIME)
+            end
+
+            local fast_stats = luamark.timeit(work, { rounds = 5 })
+            local slow_stats = luamark.timeit(work, { rounds = 5, before = h.noop })
+
+            assert.is_near(fast_stats.mean, slow_stats.mean, TIME_TOL)
+            assert.is_true(fast_stats.mean <= slow_stats.mean + TIME_TOL)
          end)
       end)
 
