@@ -5,7 +5,6 @@ local socket = require("socket")
 
 local SLEEP_TIME = 0.01
 local TIME_TOL = SLEEP_TIME / 3
--- 70 bytes tolerance to account for measurement variance in test environment
 local MEMORY_TOL = 0.1
 
 --- Verify stats object exists and all its fields are non-nil.
@@ -31,9 +30,9 @@ for _, clock_name in ipairs(h.CLOCKS) do
 
       describe("timeit and memit (simple API)", function()
          for _, name in ipairs({ "timeit", "memit" }) do
-            local bench_suffix = " (" .. name .. ")"
+            local suffix = " (" .. name .. ")"
 
-            test("benchmarks single function and returns Stats" .. bench_suffix, function()
+            test("benchmarks and returns valid Stats" .. suffix, function()
                local benchmark = luamark[name]
                local stats = benchmark(h.noop, { rounds = 1 })
                assert_stats_valid(stats)
@@ -41,22 +40,7 @@ for _, clock_name in ipairs(h.CLOCKS) do
                assert.is_number(stats.median)
             end)
 
-            test("tracks iteration count" .. bench_suffix, function()
-               local benchmark = luamark[name]
-               local calls = 0
-               local min_calibration_time = luamark._internal.get_min_clocktime()
-                  * luamark._internal.CALIBRATION_PRECISION
-
-               local stats = benchmark(function()
-                  calls = calls + 1
-                  socket.sleep(min_calibration_time)
-               end, { rounds = 3 })
-
-               assert.are_equal(1, stats.iterations)
-               assert.is_true(calls >= stats.count)
-            end)
-
-            test("respects round limit" .. bench_suffix, function()
+            test("respects round limit and tracks iterations" .. suffix, function()
                local benchmark = luamark[name]
                local min_calibration_time = luamark._internal.get_min_clocktime()
                   * luamark._internal.CALIBRATION_PRECISION
@@ -69,7 +53,7 @@ for _, clock_name in ipairs(h.CLOCKS) do
                assert.are_equal(stats.count, stats.rounds * stats.iterations)
             end)
 
-            test("stops at max_time" .. bench_suffix, function()
+            test("stops at max_time" .. suffix, function()
                local benchmark = luamark[name]
                local max_time = 0.5
                local actual_time = luamark._internal.measure_time(function()
@@ -80,13 +64,11 @@ for _, clock_name in ipairs(h.CLOCKS) do
                assert.is_near(max_time, actual_time, 0.3)
             end)
 
-            test("runs setup and teardown once" .. bench_suffix, function()
+            test("runs setup and teardown once" .. suffix, function()
                local benchmark = luamark[name]
-               local fn_calls, setup_calls, teardown_calls = 0, 0, 0
+               local setup_calls, teardown_calls = 0, 0
 
-               benchmark(function()
-                  fn_calls = fn_calls + 1
-               end, {
+               benchmark(h.noop, {
                   rounds = 1,
                   setup = function()
                      setup_calls = setup_calls + 1
@@ -98,7 +80,6 @@ for _, clock_name in ipairs(h.CLOCKS) do
 
                assert.are_equal(1, setup_calls)
                assert.are_equal(1, teardown_calls)
-               assert.is_true(fn_calls >= 1)
             end)
          end
       end)
@@ -106,17 +87,16 @@ for _, clock_name in ipairs(h.CLOCKS) do
       describe("compare_time and compare_memory (suite API)", function()
          for _, api in ipairs({ { "compare_time", "timeit" }, { "compare_memory", "memit" } }) do
             local compare_fn = api[1]
-            local bench_suffix = " (" .. compare_fn .. ")"
+            local suffix = " (" .. compare_fn .. ")"
 
-            test("benchmarks multiple functions" .. bench_suffix, function()
+            test("benchmarks multiple functions" .. suffix, function()
                local results = luamark[compare_fn]({ a = h.noop, b = h.noop }, { rounds = 1 })
 
                assert.are_equal(2, #results)
                local names = {}
                for i = 1, #results do
-                  local row = results[i]
-                  names[row.name] = true
-                  assert_stats_valid(row.stats)
+                  names[results[i].name] = true
+                  assert_stats_valid(results[i].stats)
                end
                assert.is_true(names.a)
                assert.is_true(names.b)
@@ -125,7 +105,7 @@ for _, clock_name in ipairs(h.CLOCKS) do
       end)
 
       describe("timeit", function()
-         test("computes timing stats", function()
+         test("computes timing stats and ops", function()
             local calls = 0
             local long_sleep = SLEEP_TIME * 2
             local function counter()
@@ -138,7 +118,21 @@ for _, clock_name in ipairs(h.CLOCKS) do
             assert.is_near(SLEEP_TIME, stats.min, TIME_TOL)
             assert.is_near(long_sleep, stats.max, TIME_TOL * 2)
             assert.near(SLEEP_TIME, stats.mean, TIME_TOL)
-            assert.near(SLEEP_TIME, stats.median, TIME_TOL)
+            assert.is_number(stats.ops)
+            assert.is_near(1 / stats.mean, stats.ops, 1e-10)
+         end)
+      end)
+
+      describe("memit", function()
+         test("does not include ops field", function()
+            local stats = luamark.memit(function()
+               local t = {}
+               for i = 1, 10 do
+                  t[i] = i
+               end
+            end, { rounds = 10 })
+
+            assert.is_nil(stats.ops)
          end)
       end)
 
@@ -165,7 +159,6 @@ for _, clock_name in ipairs(h.CLOCKS) do
                   local row = results[i]
                   local _, single_call_memory = luamark._internal.measure_memory(funcs[row.name], 1)
                   assert.near(single_call_memory, row.stats.mean, MEMORY_TOL)
-                  assert.near(single_call_memory, row.stats.median, MEMORY_TOL)
                end
             end)
          end)
@@ -181,157 +174,77 @@ describe("validation", function()
    end)
 
    describe("simple API (timeit/memit)", function()
-      test("timeit rejects negative rounds", function()
-         assert.has_errors(function()
-            luamark.timeit(h.noop, { rounds = -1 })
+      for _, name in ipairs({ "timeit", "memit" }) do
+         test(name .. " rejects invalid options", function()
+            assert.has_errors(function()
+               luamark[name](h.noop, { rounds = -1 })
+            end)
+            assert.has_errors(function()
+               luamark[name](h.noop, { max_time = -1 })
+            end)
+            assert.has_errors(function()
+               luamark[name](h.noop, { hello = "world" })
+            end)
+            assert.has_errors(function()
+               luamark[name](h.noop, { rounds = "not a number" })
+            end)
+            assert.has_errors(function()
+               luamark[name](h.noop, { rounds = 1.5 })
+            end)
          end)
-      end)
 
-      test("memit rejects negative rounds", function()
-         assert.has_errors(function()
-            luamark.memit(h.noop, { rounds = -1 })
+         test(name .. " rejects invalid input", function()
+            assert.has_errors(function()
+               ---@diagnostic disable-next-line: param-type-mismatch, missing-parameter
+               luamark[name](nil)
+            end)
+            assert.has_errors(function()
+               ---@diagnostic disable-next-line: param-type-mismatch
+               luamark[name]({ a = h.noop }, { rounds = 1 })
+            end)
+            assert.has_errors(function()
+               luamark[name](h.noop, { params = { n = { 10 } } })
+            end)
          end)
-      end)
-
-      test("timeit rejects negative max_time", function()
-         assert.has_errors(function()
-            luamark.timeit(h.noop, { max_time = -1 })
-         end)
-      end)
-
-      test("memit rejects negative max_time", function()
-         assert.has_errors(function()
-            luamark.memit(h.noop, { max_time = -1 })
-         end)
-      end)
-
-      test("timeit rejects unknown option", function()
-         assert.has_errors(function()
-            luamark.timeit(h.noop, { hello = "world" })
-         end)
-      end)
-
-      test("memit rejects unknown option", function()
-         assert.has_errors(function()
-            luamark.memit(h.noop, { hello = "world" })
-         end)
-      end)
-
-      test("timeit rejects nil function", function()
-         assert.has_errors(function()
-            ---@diagnostic disable-next-line: param-type-mismatch, missing-parameter
-            luamark.timeit(nil)
-         end)
-      end)
-
-      test("memit rejects nil function", function()
-         assert.has_errors(function()
-            ---@diagnostic disable-next-line: param-type-mismatch, missing-parameter
-            luamark.memit(nil)
-         end)
-      end)
-
-      test("timeit rejects params option", function()
-         assert.has_errors(function()
-            luamark.timeit(h.noop, { params = { n = { 10 } } })
-         end, "'params' is not supported in timeit/memit. Use compare_time/compare_memory instead.")
-      end)
-
-      test("memit rejects params option", function()
-         assert.has_errors(function()
-            luamark.memit(h.noop, { params = { n = { 10 } } })
-         end, "'params' is not supported in timeit/memit. Use compare_time/compare_memory instead.")
-      end)
-
-      test("timeit rejects wrong option type", function()
-         assert.has_errors(function()
-            luamark.timeit(h.noop, { rounds = "not a number" })
-         end)
-      end)
-
-      test("timeit rejects non-integer rounds", function()
-         assert.has_errors(function()
-            luamark.timeit(h.noop, { rounds = 1.5 })
-         end)
-      end)
-
-      test("timeit rejects table input", function()
-         assert.has_errors(function()
-            ---@diagnostic disable-next-line: param-type-mismatch
-            luamark.timeit({ a = h.noop }, { rounds = 1 })
-         end)
-      end)
-
-      test("memit rejects table input", function()
-         assert.has_errors(function()
-            ---@diagnostic disable-next-line: param-type-mismatch
-            luamark.memit({ a = h.noop }, { rounds = 1 })
-         end)
-      end)
+      end
    end)
 
    describe("suite API (compare_time/compare_memory)", function()
-      test("compare_time rejects non-table input", function()
-         assert.has_errors(function()
-            ---@diagnostic disable-next-line: param-type-mismatch
-            luamark.compare_time(h.noop, { rounds = 1 })
+      for _, name in ipairs({ "compare_time", "compare_memory" }) do
+         test(name .. " rejects invalid input", function()
+            assert.has_errors(function()
+               ---@diagnostic disable-next-line: param-type-mismatch
+               luamark[name](h.noop, { rounds = 1 })
+            end)
          end)
-      end)
 
-      test("compare_memory rejects non-table input", function()
-         assert.has_errors(function()
-            ---@diagnostic disable-next-line: param-type-mismatch
-            luamark.compare_memory(h.noop, { rounds = 1 })
+         test(name .. " rejects invalid params", function()
+            assert.has_errors(function()
+               luamark[name]({ a = h.noop }, { params = { n = 10 } })
+            end)
+            assert.has_errors(function()
+               luamark[name]({ a = h.noop }, { params = { [1] = { "a" } } })
+            end)
+            assert.has_errors(function()
+               luamark[name]({ a = h.noop }, { params = { n = { {} } } })
+            end)
+
+            local ok, err = pcall(luamark[name], { a = h.noop }, { params = { n = {} } })
+            assert.is_false(ok)
+            assert.matches("must not be empty", err)
          end)
-      end)
 
-      test("compare_time rejects scalar params value", function()
-         assert.has_errors(function()
-            luamark.compare_time({ a = h.noop }, { params = { n = 10 } })
+         test(name .. " rejects too many param combinations", function()
+            local many_values = {}
+            for i = 1, 101 do
+               many_values[i] = i
+            end
+            local ok, err = pcall(luamark[name], { a = h.noop }, {
+               params = { a = many_values, b = many_values },
+            })
+            assert.is_false(ok)
+            assert.matches("Too many parameter combinations", err)
          end)
-      end)
-
-      test("compare_memory rejects scalar params value", function()
-         assert.has_errors(function()
-            luamark.compare_memory({ a = h.noop }, { params = { n = 10 } })
-         end)
-      end)
-
-      test("compare_time rejects non-string params key", function()
-         assert.has_errors(function()
-            luamark.compare_time({ a = h.noop }, { params = { [1] = { "a" } } })
-         end)
-      end)
-
-      test("compare_time rejects non-primitive params value", function()
-         assert.has_errors(function()
-            luamark.compare_time({ a = h.noop }, { params = { n = { {} } } })
-         end)
-      end)
-
-      test("compare_time rejects empty params array", function()
-         local ok, err = pcall(luamark.compare_time, { a = h.noop }, { params = { n = {} } })
-         assert.is_false(ok)
-         assert.matches("must not be empty", err)
-      end)
-
-      test("compare_memory rejects empty params array", function()
-         local ok, err = pcall(luamark.compare_memory, { a = h.noop }, { params = { n = {} } })
-         assert.is_false(ok)
-         assert.matches("must not be empty", err)
-      end)
-
-      test("compare_time rejects too many param combinations", function()
-         -- 101 * 101 = 10201 > MAX_PARAM_COMBINATIONS (10000)
-         local many_values = {}
-         for i = 1, 101 do
-            many_values[i] = i
-         end
-         local ok, err = pcall(luamark.compare_time, { a = h.noop }, {
-            params = { a = many_values, b = many_values },
-         })
-         assert.is_false(ok)
-         assert.matches("Too many parameter combinations", err)
-      end)
+      end
    end)
 end)

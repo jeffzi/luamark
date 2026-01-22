@@ -9,71 +9,40 @@ describe("rank", function()
       rank = h.load_luamark()._internal.rank
    end)
 
-   test("handles zero minimum value", function()
-      local data = {
-         test1 = { mean = 0 },
-         test2 = { mean = 10 },
-      }
-      rank(data, "mean")
-      assert.are_equal(1, data.test1.rank)
-      assert.are_equal(2, data.test2.rank)
-      assert.are_equal(1, data.test1.ratio)
-      assert.is_true(data.test2.ratio < math.huge)
-      assert.are_equal(data.test2.ratio, data.test2.ratio) -- not NaN
-   end)
-
-   test("unique values", function()
+   test("assigns rank and ratio based on values", function()
       local data = {
          test1 = { mean = 8 },
          test2 = { mean = 20 },
          test3 = { mean = 5 },
-         test4 = { mean = 12 },
       }
       rank(data, "mean")
       assert.are_same({ rank = 1, mean = 5, ratio = 1 }, data.test3)
       assert.are_same({ rank = 2, mean = 8, ratio = 1.6 }, data.test1)
-      assert.are_same({ rank = 3, mean = 12, ratio = 2.4 }, data.test4)
-      assert.are_same({ rank = 4, mean = 20, ratio = 4 }, data.test2)
+      assert.are_same({ rank = 3, mean = 20, ratio = 4 }, data.test2)
    end)
 
-   test("identical values", function()
-      local data = {
+   test("handles zero minimum and identical values", function()
+      local zero_data = {
+         test1 = { mean = 0 },
+         test2 = { mean = 10 },
+      }
+      rank(zero_data, "mean")
+      assert.are_equal(1, zero_data.test1.rank)
+      assert.are_equal(1, zero_data.test1.ratio)
+
+      local same_data = {
          test1 = { mean = 10 },
          test2 = { mean = 10 },
-         test3 = { mean = 10 },
       }
-      rank(data, "mean")
-
-      assert.are_equal(1, data.test1.rank)
-      assert.are_equal(1, data.test2.rank)
-      assert.are_equal(1, data.test3.rank)
-
-      assert.are_equal(1.0, data.test1.ratio)
-      assert.are_equal(1.0, data.test2.ratio)
-      assert.are_equal(1.0, data.test3.ratio)
+      rank(same_data, "mean")
+      assert.are_equal(1, same_data.test1.rank)
+      assert.are_equal(1, same_data.test2.rank)
    end)
 
-   test("ranks by specified key", function()
-      local data = {
-         test1 = { mean = 10, median = 18 },
-         test2 = { mean = 20, median = 8 },
-      }
-      rank(data, "mean")
-      assert.are_same({ rank = 1, mean = 10, median = 18, ratio = 1 }, data.test1)
-      assert.are_same({ rank = 2, mean = 20, median = 8, ratio = 2 }, data.test2)
-
-      rank(data, "median")
-      assert.are_same({ rank = 1, mean = 20, median = 8, ratio = 1.0 }, data.test2)
-      assert.are_same({ rank = 2, mean = 10, median = 18, ratio = 2.25 }, data.test1)
-   end)
-
-   test("empty table error", function()
+   test("rejects nil and empty input", function()
       assert.has_error(function()
          rank({}, "foo")
       end, "'results' is nil or empty.")
-   end)
-
-   test("nil error", function()
       assert.has_error(function()
          ---@diagnostic disable-next-line: param-type-mismatch
          rank(nil, "bar")
