@@ -181,11 +181,26 @@ local function escape_csv(value)
    return value
 end
 
+local MAX_PARAM_COMBINATIONS = 10000
+
 ---@param params table<string, any[]>?
 ---@return table[] # Array of param combinations
 local function expand_params(params)
    if not params or not next(params) then
       return { {} }
+   end
+
+   local total_combinations = 1
+   for _, values in pairs(params) do
+      total_combinations = total_combinations * #values
+      if total_combinations > MAX_PARAM_COMBINATIONS then
+         error(
+            string.format(
+               "Too many parameter combinations (exceeds %d). Reduce the number of parameter values.",
+               MAX_PARAM_COMBINATIONS
+            )
+         )
+      end
    end
 
    local combos = { {} }
@@ -249,6 +264,7 @@ end
 ---@field warmups integer Number of warmup rounds.
 ---@field timestamp string ISO 8601 UTC timestamp of benchmark start.
 ---@field unit "s"|"kb" Measurement unit (seconds or kilobytes).
+---@field ops? number Operations per second (1/mean). Only present for time benchmarks.
 ---@field rank? integer Rank when comparing multiple benchmarks.
 ---@field ratio? number Ratio relative to fastest benchmark.
 
@@ -369,15 +385,14 @@ end
 local function humanize(value, base_unit)
    local units = base_unit == "s" and TIME_UNITS or MEMORY_UNITS
 
-   for _, unit in ipairs(units) do
-      local symbol, threshold = unit[1], unit[2]
+   for i = 1, #units do
+      local symbol, threshold = units[i][1], units[i][2]
       if value >= threshold then
          return trim_zeroes(string.format("%.2f", value / threshold)) .. symbol
       end
    end
 
-   local smallest = units[#units]
-   return "0" .. smallest[1]
+   return "0" .. units[#units][1]
 end
 
 --- Format statistical measurements into a readable string.
@@ -396,34 +411,35 @@ end
 ---@param stats Stats
 ---@return table<string, string>
 local function format_row(stats)
-   local u = stats.unit
+   local unit = stats.unit
    return {
       rank = stats.rank and tostring(stats.rank) or "",
       ratio = stats.ratio and string.format("%.2f", stats.ratio) or "",
-      median = humanize(stats.median, u),
-      mean = humanize(stats.mean, u),
-      min = humanize(stats.min, u),
-      max = humanize(stats.max, u),
-      stddev = humanize(stats.stddev, u),
+      median = humanize(stats.median, unit),
+      mean = humanize(stats.mean, unit),
+      min = humanize(stats.min, unit),
+      max = humanize(stats.max, unit),
+      stddev = humanize(stats.stddev, unit),
+      ops = stats.ops and (trim_zeroes(string.format("%.2f", stats.ops)) .. "/s") or "",
       rounds = tostring(stats.rounds),
    }
 end
 
----@param content string
+---@param str string
 ---@param width integer
 ---@return string
-local function pad(content, width)
-   return content .. string.rep(" ", width - #content)
+local function pad(str, width)
+   return str .. string.rep(" ", width - #str)
 end
 
----@param content string
----@param expected_width integer
+---@param str string
+---@param width integer
 ---@return string
-local function center(content, expected_width)
-   local total_padding = math.max(0, expected_width - #content)
+local function center(str, width)
+   local total_padding = math.max(0, width - #str)
    local left_padding = math.floor(total_padding / 2)
    local right_padding = total_padding - left_padding
-   return string.rep(" ", left_padding) .. content .. string.rep(" ", right_padding)
+   return string.rep(" ", left_padding) .. str .. string.rep(" ", right_padding)
 end
 
 ---@param t string[]
@@ -501,6 +517,7 @@ local SUMMARIZE_HEADERS = {
    "min",
    "max",
    "stddev",
+   "ops",
    "rounds",
 }
 
@@ -529,7 +546,6 @@ local function truncate_names_to_fit(rows, widths, max_width)
    for i = 2, #SUMMARIZE_HEADERS do
       other_width = other_width + widths[i]
    end
-   -- Account for embedded bar column and spacing between columns
    local bar_col_width = EMBEDDED_BAR_WIDTH + 2
    local max_name = math.max(
       NAME_MIN_WIDTH,
@@ -569,11 +585,12 @@ local function render_plain_table(rows, widths)
    end
    local ratio_bar_width = EMBEDDED_BAR_WIDTH + max_ratio_width + 2
 
-   -- Build header and underline rows
    local header_cells, underline_cells = {}, {}
    for i, header in ipairs(SUMMARIZE_HEADERS) do
       local width = (header == "ratio") and ratio_bar_width or widths[i]
-      local label = (header == "ratio") and "Ratio" or header:gsub("^%l", string.upper)
+      local label = (header == "ratio") and "Ratio"
+         or (header == "ops") and "Op/s"
+         or header:gsub("^%l", string.upper)
       header_cells[#header_cells + 1] = center(label, width)
       underline_cells[#underline_cells + 1] = string.rep("-", width)
    end
@@ -606,7 +623,8 @@ end
 local function render_markdown_table(rows, widths)
    local header_cells, underline_cells = {}, {}
    for i, header in ipairs(SUMMARIZE_HEADERS) do
-      header_cells[#header_cells + 1] = center(header:gsub("^%l", string.upper), widths[i])
+      local label = (header == "ops") and "Op/s" or header:gsub("^%l", string.upper)
+      header_cells[#header_cells + 1] = center(label, widths[i])
       underline_cells[#underline_cells + 1] = string.rep("-", widths[i])
    end
 
@@ -876,6 +894,10 @@ local function build_stats_result(samples, rounds, iterations, timestamp, unit)
    stats.timestamp = timestamp
    stats.unit = unit
 
+   if unit == "s" and stats.mean > 0 then
+      stats.ops = 1 / stats.mean
+   end
+
    setmetatable(stats, {
       __tostring = function(self)
          return stats_tostring(self, unit)
@@ -1054,12 +1076,12 @@ end
 ---@return function? after Per-iteration teardown.
 local function parse_spec(spec)
    if type(spec) == "function" then
-      return spec, nil, nil
+      return spec
    end
    assert(type(spec) == "table", "spec must be a function or table")
    assert(type(spec.fn) == "function", "spec.fn must be a function")
-   assert(not spec.before or type(spec.before) == "function", "spec.before must be a function")
-   assert(not spec.after or type(spec.after) == "function", "spec.after must be a function")
+   assert(spec.before == nil or type(spec.before) == "function", "spec.before must be a function")
+   assert(spec.after == nil or type(spec.after) == "function", "spec.after must be a function")
    return spec.fn, spec.before, spec.after
 end
 
@@ -1128,14 +1150,7 @@ local SUITE_ONLY_OPTS = {
 ---@param extra_opts? table<string, string> Additional valid options.
 ---@return string? expected_type Expected type or nil if unknown option.
 local function get_option_type(key, extra_opts)
-   local opt_type = COMMON_OPTS[key]
-   if opt_type then
-      return opt_type
-   end
-   if extra_opts then
-      return extra_opts[key]
-   end
-   return nil
+   return COMMON_OPTS[key] or (extra_opts and extra_opts[key])
 end
 
 --- Validate options against allowed types.
@@ -1166,6 +1181,9 @@ local function validate_params(params)
       end
       if type(values) ~= "table" then
          error(string.format("params['%s'] must be an array, got %s", name, type(values)))
+      end
+      if #values == 0 then
+         error(string.format("params['%s'] must not be empty", name))
       end
       for i, v in ipairs(values) do
          local vtype = type(v)
@@ -1377,6 +1395,21 @@ end
 ---@return string Formatted memory string (e.g., "512kB", "1.5MB").
 function luamark.humanize_memory(kb)
    return humanize(kb, "kb")
+end
+
+--- Unload modules matching a Lua pattern from package.loaded.
+--- Useful for benchmarking module load times or resetting state.
+---@param pattern string Lua pattern to match module names against.
+---@return integer count Number of modules unloaded.
+function luamark.unload(pattern)
+   local count = 0
+   for name in pairs(package.loaded) do
+      if name:match(pattern) then
+         package.loaded[name] = nil
+         count = count + 1
+      end
+   end
+   return count
 end
 
 --- Return a copy of the current configuration.

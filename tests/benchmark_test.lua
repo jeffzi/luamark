@@ -308,5 +308,30 @@ describe("validation", function()
             luamark.compare_time({ a = h.noop }, { params = { n = { {} } } })
          end)
       end)
+
+      test("compare_time rejects empty params array", function()
+         local ok, err = pcall(luamark.compare_time, { a = h.noop }, { params = { n = {} } })
+         assert.is_false(ok)
+         assert.matches("must not be empty", err)
+      end)
+
+      test("compare_memory rejects empty params array", function()
+         local ok, err = pcall(luamark.compare_memory, { a = h.noop }, { params = { n = {} } })
+         assert.is_false(ok)
+         assert.matches("must not be empty", err)
+      end)
+
+      test("compare_time rejects too many param combinations", function()
+         -- 101 * 101 = 10201 > MAX_PARAM_COMBINATIONS (10000)
+         local many_values = {}
+         for i = 1, 101 do
+            many_values[i] = i
+         end
+         local ok, err = pcall(luamark.compare_time, { a = h.noop }, {
+            params = { a = many_values, b = many_values },
+         })
+         assert.is_false(ok)
+         assert.matches("Too many parameter combinations", err)
+      end)
    end)
 end)

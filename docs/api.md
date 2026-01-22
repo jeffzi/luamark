@@ -327,6 +327,7 @@ print(stats)  -- "1.5ms ± 0.1ms per round (10 rounds)"
 | warmups    | integer   | Number of warmup rounds                        |
 | timestamp  | string    | ISO 8601 UTC timestamp of benchmark start      |
 | unit       | "s"\|"kb" | Measurement unit (seconds or kilobytes)        |
+| ops        | number?   | Operations per second (time benchmarks only)   |
 | rank       | integer?  | Rank (only in `compare_*` results)             |
 | ratio      | number?   | Ratio to fastest (only in `compare_*` results) |
 
@@ -384,3 +385,28 @@ Selects the best unit automatically (TB, GB, MB, kB, B).
 @_param_ `kb` — Memory in kilobytes.
 
 @_return_ — Formatted memory string (e.g., "512kB", "1.5MB").
+
+### unload
+
+```lua
+function luamark.unload(pattern: string) -> integer
+```
+
+Unload modules matching a Lua pattern from `package.loaded`.
+Useful for benchmarking module load times or resetting state between runs.
+
+@_param_ `pattern` — Lua pattern to match module names against.
+
+@_return_ — Number of modules unloaded.
+
+```lua
+-- Unload all modules starting with "mylib"
+local count = luamark.unload("^mylib")
+print(count)  -- Number of modules unloaded
+
+-- Benchmark module load time
+luamark.unload("^mymodule$")
+local stats = luamark.timeit(function()
+   require("mymodule")
+end)
+```

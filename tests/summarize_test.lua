@@ -129,7 +129,7 @@ describe("summarize", function()
       }
       local output = luamark.summarize(results, "csv")
 
-      assert.matches("name,rank,ratio,median,mean,min,max,stddev,rounds", output)
+      assert.matches("name,rank,ratio,median,mean,min,max,stddev,ops,rounds", output)
       assert.matches("fast,1,", output)
       assert.matches("slow,2,", output)
    end)
