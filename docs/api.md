@@ -5,11 +5,12 @@
 Set global configuration options directly on the module:
 
 ```lua
-luamark.max_iterations = 1e6  -- Maximum iterations per round
-luamark.min_rounds = 100      -- Minimum benchmark rounds
-luamark.max_rounds = 1e6      -- Maximum benchmark rounds
-luamark.warmups = 1           -- Number of warmup rounds
+luamark.rounds = 100  -- Target sample count
+luamark.time = 1      -- Target duration in seconds
 ```
+
+Benchmarks run until **both** targets are met: at least `rounds` samples collected
+and at least `time` seconds elapsed.
 
 ### clock_name
 
@@ -18,19 +19,6 @@ luamark.clock_name  -- "chronos" | "posix.time" | "socket" | "os.clock"
 ```
 
 Read-only string indicating which clock module is in use.
-
-### get_config
-
-```lua
-function luamark.get_config() -> table
-```
-
-Return a copy of the current configuration values:
-
-```lua
-local cfg = luamark.get_config()
--- { max_iterations = 1e6, min_rounds = 100, max_rounds = 1e6, warmups = 1 }
-```
 
 ## API Overview
 
@@ -62,7 +50,7 @@ local stats = luamark.timeit(function()
    -- code to benchmark
 end, { rounds = 10 })
 
-print(stats)  -- "1.5ms ± 0.1ms per round (10 rounds)"
+print(stats)  -- "1.5ms ± 0.1ms per iter (10 rounds × 1 iter)"
 print(stats.mean, stats.median)  -- Access individual fields
 ```
 
@@ -80,15 +68,15 @@ local stats = luamark.memit(function()
    for i = 1, 1000 do t[i] = i end
 end, { rounds = 10 })
 
-print(stats)  -- "1.2kB ± 0.05kB per round (10 rounds)"
+print(stats)  -- "1.2kB ± 0.05kB per iter (10 rounds × 1 iter)"
 ```
 
 ### SimpleOptions
 
 ```lua
 ---@class SimpleOptions
----@field rounds? integer Number of benchmark rounds.
----@field max_time? number Maximum run time in seconds.
+---@field rounds? integer Target number of benchmark rounds.
+---@field time? number Target duration in seconds.
 ---@field setup? fun(): any Function executed once before benchmark; returns context.
 ---@field teardown? fun(ctx?: any) Function executed once after benchmark.
 ---@field before? fun(ctx?: any): any Function executed before each iteration.
@@ -154,8 +142,8 @@ Compare multiple functions for memory usage. Returns ranked results.
 
 ```lua
 ---@class SuiteOptions
----@field rounds? integer Number of benchmark rounds.
----@field max_time? number Maximum run time in seconds.
+---@field rounds? integer Target number of benchmark rounds.
+---@field time? number Target duration in seconds.
 ---@field setup? fun(p: table): any Function executed once; receives params, returns context.
 ---@field teardown? fun(ctx: any, p: table) Function executed once after benchmark.
 ---@field before? fun(ctx: any, p: table): any Function executed before each iteration.
@@ -309,7 +297,7 @@ Returned by all benchmark functions. Has a `__tostring` metamethod for readable 
 
 ```lua
 local stats = luamark.timeit(fn, { rounds = 10 })
-print(stats)  -- "1.5ms ± 0.1ms per round (10 rounds)"
+print(stats)  -- "1.5ms ± 0.1ms per iter (10 rounds × 1 iter)"
 ```
 
 | Field      | Type      | Description                                    |
@@ -324,7 +312,6 @@ print(stats)  -- "1.5ms ± 0.1ms per round (10 rounds)"
 | samples    | number[]  | Raw samples (sorted)                           |
 | rounds     | integer   | Number of benchmark rounds executed            |
 | iterations | integer   | Number of iterations per round                 |
-| warmups    | integer   | Number of warmup rounds                        |
 | timestamp  | string    | ISO 8601 UTC timestamp of benchmark start      |
 | unit       | "s"\|"kb" | Measurement unit (seconds or kilobytes)        |
 | ops        | number?   | Operations per second (time benchmarks only)   |

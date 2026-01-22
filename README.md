@@ -65,7 +65,7 @@ local stats = luamark.timeit(function()
 end)
 
 print(stats)
--- Output: 31.34ns ± 172.86ns per round (558140 rounds)
+-- Output: 25.01ns ± 80.26ns per iter (727283 rounds × 1 iter)
 ```
 
 Measure memory allocation:
@@ -79,7 +79,7 @@ local stats = luamark.memit(function()
 end)
 
 print(stats)
--- Output: 1.07kB ± 15.86B per round (8876 rounds)
+-- Output: 1.07kB ± 21.96B per iter (1768 rounds × 1 iter)
 ```
 
 ### Comparing Functions
@@ -111,28 +111,29 @@ print(luamark.summarize(results, "plain"))  -- detailed output
 
 ```text
 n=100
-    Name      Rank      Ratio       Median    Mean     Min     Max     Stddev   Rounds
-------------  ----  --------------  ------  --------  -----  -------  --------  -------
-table_concat  1     ██       1.00x  292ns   291.41ns  167ns  50.25us  175.93ns  1000000
-loop          2     ████████ 3.28x  958ns   972.18ns  833ns  89.42us  361.36ns  311688
+    Name      Rank      Ratio       Median   Mean    Min    Max     Stddev    Iters
+------------  ----  --------------  ------  ------  -----  ------  --------  -------
+table_concat  1     ██       1.00x  292ns   300ns   167ns  27us    196ns     100 × 1
+loop          2     ████████ 3.42x  1us     1.01us  875ns  27.4us  417ns     100 × 1
 
 n=1000
-    Name      Rank       Ratio       Median    Mean      Min      Max      Stddev   Rounds
-------------  ----  ---------------  -------  -------  -------  --------  --------  ------
-table_concat  1     █         1.00x  3.92us   4us      3.79us   44.54us   405.89ns  224300
-loop          2     ████████ 13.44x  52.62us  53.93us  52.12us  156.42us  3.11us    17791
+    Name      Rank       Ratio       Median   Mean    Min     Max     Stddev   Iters
+------------  ----  ---------------  -------  ------  ------  ------  -------  -------
+table_concat  1     █         1.00x  4.04us   4.2us   3.79us  91us    940ns    100 × 1
+loop          2     ████████ 13.17x  53.25us  55us    50.5us  256us   5.44us   100 × 1
 ```
 
 ## Technical Details
 
 ### Configuration
 
-LuaMark provides several configuration options that can be set globally:
+LuaMark provides two configuration options:
 
-- `max_iterations`: Maximum number of iterations per round (default: 1e6)
-- `min_rounds`: Minimum number of rounds to run (default: 100)
-- `max_rounds`: Maximum number of rounds to run (default: 1e6)
-- `warmups`: Number of warmup rounds before measurement (default: 1)
+- `rounds`: Target sample count (default: 100)
+- `time`: Target duration in seconds (default: 1)
+
+Benchmarks run until **both** targets are met: at least `rounds` samples collected
+and at least `time` seconds elapsed.
 
 Modify these settings directly:
 
@@ -140,10 +141,10 @@ Modify these settings directly:
 local luamark = require("luamark")
 
 -- Increase minimum rounds for more statistical reliability
-luamark.min_rounds = 1000
+luamark.rounds = 1000
 
--- Adjust warmup rounds
-luamark.warmups = 5
+-- Run benchmarks for at least 2 seconds
+luamark.time = 2
 ```
 
 ### Iterations and Rounds

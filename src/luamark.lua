@@ -10,17 +10,15 @@ local luamark = {
 -- Config
 -- ----------------------------------------------------------------------------
 
-local MIN_TIME = 1
 local CALIBRATION_PRECISION = 5
 local MEMORY_PRECISION = 4
 local BYTES_TO_KB = 1024
 local MAX_CALIBRATION_ATTEMPTS = 10
+local MAX_ITERATIONS = 1e6
 
 local config = {
-   max_iterations = 1e6,
-   min_rounds = 100,
-   max_rounds = 1e6,
-   warmups = 1,
+   rounds = 100,
+   time = 1,
 }
 
 -- ----------------------------------------------------------------------------
@@ -85,8 +83,9 @@ local function warn_low_precision_clock()
    clock_warning_shown = true
    local msg = "luamark: using os.clock (low precision, CPU time). "
       .. "Install chronos, luaposix, or luasocket for better accuracy.\n"
+   ---@diagnostic disable-next-line: deprecated
    if warn then
-      warn(msg)
+      warn(msg) ---@diagnostic disable-line: deprecated
    else
       io.stderr:write(msg)
    end
@@ -97,8 +96,8 @@ end
 ---@alias ParamValue string|number|boolean Allowed parameter value types.
 
 ---@class Options Benchmark configuration for timeit/memit.
----@field rounds? integer Number of benchmark rounds.
----@field max_time? number Maximum run time in seconds.
+---@field rounds? integer Target number of benchmark rounds.
+---@field time? number Target duration in seconds.
 ---@field setup? fun(): any Function executed once before benchmark; returns context.
 ---@field teardown? fun(ctx?: any) Function executed once after benchmark.
 ---@field before? fun(ctx?: any): any Function executed before each iteration.
@@ -279,7 +278,6 @@ end
 ---@class Stats : BaseStats
 ---@field rounds integer Number of benchmark rounds executed.
 ---@field iterations integer Number of iterations per round.
----@field warmups integer Number of warmup rounds.
 ---@field timestamp string ISO 8601 UTC timestamp of benchmark start.
 ---@field unit "s"|"kb" Measurement unit (seconds or kilobytes).
 ---@field ops? number Operations per second (1/mean). Only present for time benchmarks.
@@ -419,10 +417,11 @@ end
 ---@return string # A formatted string representing the statistical metrics.
 local function stats_tostring(stats, unit)
    return string.format(
-      "%s ± %s per round (%d rounds)",
+      "%s ± %s per iter (%d rounds × %d iter)",
       humanize(stats.mean, unit),
       humanize(stats.stddev, unit),
-      stats.rounds
+      stats.rounds,
+      stats.iterations
    )
 end
 
@@ -440,6 +439,7 @@ local function format_row(stats)
       stddev = humanize(stats.stddev, unit),
       ops = stats.ops and (trim_zeroes(string.format("%.2f", stats.ops)) .. "/s") or "",
       rounds = tostring(stats.rounds),
+      iterations = tostring(stats.iterations),
    }
 end
 
@@ -537,6 +537,7 @@ local SUMMARIZE_HEADERS = {
    "stddev",
    "ops",
    "rounds",
+   "iterations",
 }
 
 ---Calculate column widths based on header and row content.
@@ -878,37 +879,38 @@ local function calibrate_iterations(fn, setup, teardown, get_ctx, params)
 
       iterations = math.ceil(iterations * scale)
 
-      if iterations >= config.max_iterations then
-         return config.max_iterations
+      if iterations >= MAX_ITERATIONS then
+         return MAX_ITERATIONS
       end
    end
 
    return iterations
 end
 
----Return practical rounds and max time
+---Return practical rounds and max time.
+---Benchmark runs until both targets are met: at least `rounds` samples and `time` seconds.
 ---@param round_duration number
 ---@return integer rounds
----@return number max_time
+---@return number time
 local function calibrate_stop(round_duration)
    -- Guard against division by zero for extremely fast functions on low-precision clocks.
    local safe_duration = (round_duration > 0) and round_duration or get_min_clocktime()
-   local max_time = math.max(config.min_rounds * safe_duration, MIN_TIME)
-   local rounds = math.ceil(math.min(max_time / safe_duration, config.max_rounds))
-   return rounds, max_time
+   local time = math.max(config.rounds * safe_duration, config.time)
+   local rounds = math.ceil(time / safe_duration)
+   return rounds, time
 end
 
 ---@param fn any
 ---@param rounds? number
----@param max_time? number
+---@param time? number
 ---@param setup? function
 ---@param teardown? function
 ---@param before? function
 ---@param after? function
-local function validate_benchmark_args(fn, rounds, max_time, setup, teardown, before, after)
+local function validate_benchmark_args(fn, rounds, time, setup, teardown, before, after)
    assert(type(fn) == "function", "'fn' must be a function, got " .. type(fn))
    assert(rounds == nil or rounds > 0, "'rounds' must be > 0.")
-   assert(not max_time or max_time > 0, "'max_time' must be > 0.")
+   assert(not time or time > 0, "'time' must be > 0.")
 
    local function_args = { setup = setup, teardown = teardown, before = before, after = after }
    for name, value in pairs(function_args) do
@@ -929,7 +931,6 @@ local function build_stats_result(samples, rounds, iterations, timestamp, unit)
    local stats = calculate_stats(samples) ---@cast stats Stats
    stats.rounds = rounds
    stats.iterations = iterations
-   stats.warmups = config.warmups
    stats.timestamp = timestamp
    stats.unit = unit
 
@@ -980,7 +981,7 @@ end
 ---@param disable_gc boolean Controls garbage collection during benchmark.
 ---@param unit default_unit Measurement unit.
 ---@param rounds? number Number of rounds.
----@param max_time? number Maximum run time in seconds.
+---@param time? number Target duration in seconds.
 ---@param setup? function Runs once before benchmark, returns context.
 ---@param teardown? function Runs once after benchmark.
 ---@param params? table Parameter values for this run (nil for single mode).
@@ -996,7 +997,7 @@ local function single_benchmark(
    disable_gc,
    unit,
    rounds,
-   max_time,
+   time,
    setup,
    teardown,
    params,
@@ -1006,7 +1007,7 @@ local function single_benchmark(
    global_after,
    single_mode
 )
-   validate_benchmark_args(fn, rounds, max_time, setup, teardown, spec_before, spec_after)
+   validate_benchmark_args(fn, rounds, time, setup, teardown, spec_before, spec_after)
    warn_low_precision_clock()
    disable_gc = disable_gc ~= false
 
@@ -1048,10 +1049,9 @@ local function single_benchmark(
          end
       end
 
+   -- Calibration serves as warmup: by the time this completes,
+   -- the function has been called many times (JIT compiled, caches hot).
    local iterations = calibrate_iterations(fn, iteration_setup, iteration_teardown, get_ctx, params)
-   for _ = 1, config.warmups do
-      measure(fn, iterations, iteration_setup, iteration_teardown, get_ctx, params)
-   end
 
    local timestamp = os.date("!%Y-%m-%d %H:%M:%SZ") --[[@as string]]
    local samples = {}
@@ -1074,14 +1074,13 @@ local function single_benchmark(
 
          duration = clock() - start
          total_duration = total_duration + duration
-         if completed_rounds == 1 and not rounds and not max_time then
+         if completed_rounds == 1 and not rounds and not time then
             -- Wait 1 round to gather a sample of loop duration,
             -- as memit can slow down the loop significantly because of the collectgarbage calls.
-            rounds, max_time = calibrate_stop(duration)
+            rounds, time = calibrate_stop(duration)
          end
-      until (max_time and total_duration >= (max_time - duration))
+      until (time and total_duration >= (time - duration))
          or (rounds and completed_rounds == rounds)
-         or (completed_rounds == config.max_rounds)
    end
 
    local bench_ok, bench_err = pcall(run_benchmark_loop)
@@ -1149,7 +1148,7 @@ local function benchmark_suite(funcs, measure, disable_gc, unit, opts)
             disable_gc,
             unit,
             opts.rounds,
-            opts.max_time,
+            opts.time,
             opts.setup,
             opts.teardown,
             p,
@@ -1174,7 +1173,7 @@ end
 
 local COMMON_OPTS = {
    rounds = "number",
-   max_time = "number",
+   time = "number",
    setup = "function",
    teardown = "function",
    before = "function",
@@ -1356,7 +1355,7 @@ function luamark.timeit(fn, opts)
       true,
       "s",
       opts.rounds,
-      opts.max_time,
+      opts.time,
       opts.setup,
       opts.teardown,
       nil,
@@ -1383,7 +1382,7 @@ function luamark.memit(fn, opts)
       false,
       "kb",
       opts.rounds,
-      opts.max_time,
+      opts.time,
       opts.setup,
       opts.teardown,
       nil,
@@ -1450,17 +1449,6 @@ function luamark.unload(pattern)
       end
    end
    return count
-end
-
---- Return a copy of the current configuration.
----@return table
-function luamark.get_config()
-   return {
-      max_iterations = config.max_iterations,
-      min_rounds = config.min_rounds,
-      max_rounds = config.max_rounds,
-      warmups = config.warmups,
-   }
 end
 
 if rawget(_G, "_TEST") then

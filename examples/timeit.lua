@@ -23,7 +23,7 @@ end, { rounds = 100 })
 
 -- Stats has a readable __tostring
 print(stats)
--- Example output: 809.07ns ± 4.69us per round (100 rounds)
+-- Example output: 809.07ns ± 4.69us per iter (100 rounds × 1 iter)
 
 -- Access individual stats fields (values are in seconds)
 print(string.format("Mean: %s", luamark.humanize_time(stats.mean)))

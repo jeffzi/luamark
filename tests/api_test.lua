@@ -10,7 +10,7 @@ describe("config", function()
    end)
 
    test("accepts valid options and rejects invalid", function()
-      for _, opt in ipairs({ "max_iterations", "min_rounds", "max_rounds", "warmups" }) do
+      for _, opt in ipairs({ "rounds", "time" }) do
          luamark[opt] = 1
       end
 
@@ -18,17 +18,8 @@ describe("config", function()
          luamark.foo = 1
       end)
       assert.has_errors(function()
-         luamark.warmups = "not a number"
+         luamark.rounds = "not a number"
       end)
-   end)
-
-   test("get_config returns immutable copy", function()
-      local cfg = luamark.get_config()
-      assert.are_equal(luamark.max_iterations, cfg.max_iterations)
-      assert.are_equal(luamark.warmups, cfg.warmups)
-
-      cfg.max_iterations = 999999
-      assert.are_not_equal(999999, luamark.get_config().max_iterations)
    end)
 end)
 
@@ -96,8 +87,9 @@ describe("simple API (timeit/memit)", function()
       local stats = luamark.timeit(h.noop, { rounds = 3 })
       local str = tostring(stats)
 
-      assert.matches("per round", str)
+      assert.matches("per iter", str)
       assert.matches("%d+ rounds", str)
+      assert.matches("%d+ iter", str)
    end)
 end)
 

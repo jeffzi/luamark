@@ -53,15 +53,15 @@ for _, clock_name in ipairs(h.CLOCKS) do
                assert.are_equal(stats.count, stats.rounds * stats.iterations)
             end)
 
-            test("stops at max_time" .. suffix, function()
+            test("stops at time" .. suffix, function()
                local benchmark = luamark[name]
-               local max_time = 0.5
+               local target_time = 0.5
                local actual_time = luamark._internal.measure_time(function()
                   benchmark(function()
                      socket.sleep(0.25)
-                  end, { rounds = 1e9, max_time = max_time })
+                  end, { rounds = 1e9, time = target_time })
                end, 1)
-               assert.is_near(max_time, actual_time, 0.3)
+               assert.is_near(target_time, actual_time, 0.3)
             end)
 
             test("runs setup and teardown once" .. suffix, function()
@@ -117,7 +117,7 @@ for _, clock_name in ipairs(h.CLOCKS) do
 
             local stats = luamark.timeit(counter, {
                rounds = 100,
-               max_time = 1,
+               time = 1,
                setup = function()
                   calls = 0
                end,
@@ -232,7 +232,7 @@ describe("validation", function()
                luamark[name](h.noop, { rounds = -1 })
             end)
             assert.has_errors(function()
-               luamark[name](h.noop, { max_time = -1 })
+               luamark[name](h.noop, { time = -1 })
             end)
             assert.has_errors(function()
                luamark[name](h.noop, { hello = "world" })
