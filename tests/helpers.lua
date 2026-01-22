@@ -16,26 +16,39 @@ require_or_fail("allocspy")
 local posix_time = require_or_fail("posix.time")
 
 local CLOCKS = posix_time.clock_gettime and { "chronos", "posix.time" } or { "chronos" }
+local ALL_CLOCKS = { "chronos", "posix.time", "socket" }
 
---- Load luamark for testing. Sets _G._TEST and optionally forces a specific clock.
----@param clock_module? string Clock module to use (blocks others). If nil, uses default.
+--- Return all clocks except the specified one.
+---@param clock_name string Clock to keep.
+---@return string[]
+local function clocks_except(clock_name)
+   local result = {}
+   for i = 1, #ALL_CLOCKS do
+      if ALL_CLOCKS[i] ~= clock_name then
+         result[#result + 1] = ALL_CLOCKS[i]
+      end
+   end
+   return result
+end
+
+--- Load luamark for testing. Sets _G._TEST and optionally blocks specific clock modules.
+---@param blocked_modules? string[] Modules to block.
 ---@return table
-local function load_luamark(clock_module)
+local function load_luamark(blocked_modules)
    _G._TEST = true
    package.loaded["luamark"] = nil
 
-   if not clock_module then
+   if not blocked_modules then
       return require("luamark")
    end
 
-   -- Build set of blocked clock modules and clear their cache
    local blocked = {}
-   for i = 1, #CLOCKS do
-      package.loaded[CLOCKS[i]] = nil
-      blocked[CLOCKS[i]] = (CLOCKS[i] ~= clock_module)
+   for i = 1, #blocked_modules do
+      local name = blocked_modules[i]
+      package.loaded[name] = nil
+      blocked[name] = true
    end
 
-   -- Temporarily replace require to block other clocks
    _G.require = function(name)
       if blocked[name] then
          error(string.format("module '%s' not found", name))
@@ -52,7 +65,9 @@ end
 local function noop() end
 
 return {
+   ALL_CLOCKS = ALL_CLOCKS,
+   CLOCKS = CLOCKS,
+   clocks_except = clocks_except,
    load_luamark = load_luamark,
    noop = noop,
-   CLOCKS = CLOCKS,
 }

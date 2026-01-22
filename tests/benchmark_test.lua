@@ -21,7 +21,7 @@ for _, clock_name in ipairs(h.CLOCKS) do
       local luamark
 
       setup(function()
-         luamark = h.load_luamark(clock_name)
+         luamark = h.load_luamark(h.clocks_except(clock_name))
       end)
 
       test("uses correct clock", function()
@@ -117,7 +117,7 @@ for _, clock_name in ipairs(h.CLOCKS) do
 
             assert.is_near(SLEEP_TIME, stats.min, TIME_TOL)
             assert.is_near(long_sleep, stats.max, TIME_TOL * 2)
-            assert.near(SLEEP_TIME, stats.mean, TIME_TOL)
+            assert.is_near(SLEEP_TIME, stats.mean, TIME_TOL)
             assert.is_number(stats.ops)
             assert.is_near(1 / stats.mean, stats.ops, 1e-10)
          end)
@@ -158,7 +158,7 @@ for _, clock_name in ipairs(h.CLOCKS) do
                for i = 1, #results do
                   local row = results[i]
                   local _, single_call_memory = luamark._internal.measure_memory(funcs[row.name], 1)
-                  assert.near(single_call_memory, row.stats.mean, MEMORY_TOL)
+                  assert.is_near(single_call_memory, row.stats.mean, MEMORY_TOL)
                end
             end)
          end)

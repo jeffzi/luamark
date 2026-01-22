@@ -35,22 +35,25 @@ local function get_min_clocktime()
 end
 
 local CLOCK_PRIORITIES = { "chronos", "posix.time", "socket" }
+local NANO_TO_SEC = 1e-9
+local posix_clock_gettime, POSIX_CLOCK_MONOTONIC
+
 -- Dispatch loaded module to a function that returns the clock function and clock precision.
 local CLOCKS = {
    chronos = function(chronos)
       return chronos.nanotime, 9
    end,
    ["posix.time"] = function(posix_time)
-      local clock_gettime, CLOCK_MONOTONIC = posix_time.clock_gettime, posix_time.CLOCK_MONOTONIC
-      if not clock_gettime then
+      posix_clock_gettime = posix_time.clock_gettime
+      POSIX_CLOCK_MONOTONIC = posix_time.CLOCK_MONOTONIC
+      if not posix_clock_gettime then
          error("posix.time.clock_gettime is not supported on this OS.")
       end
-      local NANO_TO_SEC = 1e-9
-      clock = function()
-         local time_spec = clock_gettime(CLOCK_MONOTONIC)
-         return time_spec.tv_sec + time_spec.tv_nsec * NANO_TO_SEC
-      end
-      return clock, 9
+      return function()
+         local ts = posix_clock_gettime(POSIX_CLOCK_MONOTONIC)
+         return ts.tv_sec + ts.tv_nsec * NANO_TO_SEC
+      end,
+         9
    end,
    socket = function(socket)
       return socket.gettime, 4
@@ -72,6 +75,21 @@ end
 if not luamark.clock_name then
    clock, clock_precision = os.clock, _VERSION == "Luau" and 5 or 3
    luamark.clock_name = "os.clock"
+end
+
+local clock_warning_shown = false
+local function warn_low_precision_clock()
+   if clock_warning_shown or luamark.clock_name ~= "os.clock" then
+      return
+   end
+   clock_warning_shown = true
+   local msg = "luamark: using os.clock (low precision, CPU time). "
+      .. "Install chronos, luaposix, or luasocket for better accuracy.\n"
+   if warn then
+      warn(msg)
+   else
+      io.stderr:write(msg)
+   end
 end
 
 ---@alias MeasureOnce fun(fn: function, ctx: any, params: table):number
@@ -968,6 +986,7 @@ local function single_benchmark(
    single_mode
 )
    validate_benchmark_args(fn, rounds, max_time, setup, teardown, spec_before, spec_after)
+   warn_low_precision_clock()
    disable_gc = disable_gc ~= false
 
    params = params or {}

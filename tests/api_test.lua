@@ -247,3 +247,30 @@ describe("suite API (compare_time/compare_memory)", function()
       end
    end)
 end)
+
+describe("clock warning", function()
+   test("warns once on first benchmark when using os.clock", function()
+      local warn_output = {}
+      local original_warn = _G.warn
+      _G.warn = function(msg)
+         warn_output[#warn_output + 1] = msg
+      end
+
+      finally(function()
+         _G.warn = original_warn
+      end)
+
+      local luamark = h.load_luamark(h.ALL_CLOCKS)
+      assert.are_equal("os.clock", luamark.clock_name)
+
+      luamark.timeit(h.noop, { rounds = 1 })
+      local first_output = table.concat(warn_output)
+
+      warn_output = {}
+      luamark.timeit(h.noop, { rounds = 1 })
+      local second_output = table.concat(warn_output)
+
+      assert.matches("luamark: using os.clock", first_output)
+      assert.are_equal("", second_output)
+   end)
+end)
