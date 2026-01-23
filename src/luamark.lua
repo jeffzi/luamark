@@ -6,6 +6,10 @@ local luamark = {
    _VERSION = "0.9.0",
 }
 
+local math_floor = math.floor
+local math_random = math.random
+local table_sort = table.sort
+
 -- ----------------------------------------------------------------------------
 -- Config
 -- ----------------------------------------------------------------------------
@@ -23,7 +27,9 @@ local luamark = {
 -- MAX_ROUNDS caps fast functions to prevent excessive bootstrap overhead.
 -- BOOTSTRAP_RESAMPLES (10k) provides accurate 95% CI for median.
 
+local BOOTSTRAP_RESAMPLES = 10000
 local CALIBRATION_PRECISION = 5
+local DEFAULT_TERM_WIDTH = 100
 local MEMORY_PRECISION = 4
 local BYTES_TO_KB = 1024
 local MAX_CALIBRATION_ATTEMPTS = 10
@@ -35,8 +41,20 @@ local config = {
    time = 5,
 }
 
+---@generic K, V
+---@param tbl table<K, V>
+---@return K[]
+local function sorted_keys(tbl)
+   local keys = {}
+   for key in pairs(tbl) do
+      keys[#keys + 1] = key
+   end
+   table_sort(keys)
+   return keys
+end
+
 -- ----------------------------------------------------------------------------
--- Time & Memory measurement functions
+-- Measurement
 -- ----------------------------------------------------------------------------
 
 local clock, clock_precision
@@ -45,10 +63,6 @@ local clock, clock_precision
 local function get_min_clocktime()
    return 10 ^ -clock_precision
 end
-
-local math_floor = math.floor
-local math_random = math.random
-local table_sort = table.sort
 
 local CLOCK_PRIORITIES = { "chronos", "posix.time", "socket" }
 local NANO_TO_SEC = 1e-9
@@ -113,21 +127,6 @@ end
 ---@alias Target fun()|{[string]: fun()|luamark.Spec} A function or table of named functions/Specs to benchmark.
 ---@alias ParamValue string|number|boolean Allowed parameter value types.
 
----@class luamark.Options Benchmark configuration for timeit/memit.
----@field rounds? integer Target number of benchmark rounds.
----@field time? number Target duration in seconds.
----@field setup? fun(): any Function executed once before benchmark; returns context.
----@field teardown? fun(ctx?: any) Function executed once after benchmark.
----@field before? fun(ctx?: any): any Function executed before each iteration.
----@field after? fun(ctx?: any) Function executed after each iteration.
-
----@class luamark.SuiteOptions : luamark.Options Configuration for compare_time/compare_memory.
----@field setup? fun(p: table): any Function executed once before benchmark; receives params, returns context.
----@field teardown? fun(ctx: any, p: table) Function executed once after benchmark.
----@field before? fun(ctx: any, p: table): any Function executed before each iteration.
----@field after? fun(ctx: any, p: table) Function executed after each iteration.
----@field params? table<string, ParamValue[]> Parameter combinations to benchmark across.
-
 -- MeasureOnce functions accept fn, ctx, params to avoid closure overhead.
 -- Calling fn(ctx, params) directly eliminates ~64 byte allocation per call.
 ---@type MeasureOnce
@@ -158,119 +157,9 @@ do
    end
 end
 
-local DEFAULT_TERM_WIDTH = 100
-
----@return integer
-local get_term_width
-do
-   local ok, system = pcall(require, "system")
-   if ok and system.termsize then
-      get_term_width = function()
-         local rows, cols = system.termsize()
-         return rows and cols or DEFAULT_TERM_WIDTH
-      end
-   else
-      get_term_width = function()
-         return DEFAULT_TERM_WIDTH
-      end
-   end
-end
-
--- ----------------------------------------------------------------------------
--- Utils
--- ----------------------------------------------------------------------------
-
----@generic K, V
----@param tbl table<K, V>
----@return K[]
-local function sorted_keys(tbl)
-   local keys = {}
-   for key in pairs(tbl) do
-      keys[#keys + 1] = key
-   end
-   table_sort(keys)
-   return keys
-end
-
----@generic K, V
----@param tbl table<K, V>
----@return table<K, V>
-local function shallow_copy(tbl)
-   local copy = {}
-   for key, value in pairs(tbl) do
-      copy[key] = value
-   end
-   return copy
-end
-
-local MAX_PARAM_COMBINATIONS = 10000
-
----@param params table<string, any[]>?
----@return table[] # Array of param combinations
-local function expand_params(params)
-   if not params or not next(params) then
-      return { {} }
-   end
-
-   local total_combinations = 1
-   for _, values in pairs(params) do
-      total_combinations = total_combinations * #values
-      if total_combinations > MAX_PARAM_COMBINATIONS then
-         error(
-            string.format(
-               "Too many parameter combinations (exceeds %d). Reduce the number of parameter values.",
-               MAX_PARAM_COMBINATIONS
-            )
-         )
-      end
-   end
-
-   local combos = { {} }
-   local keys = sorted_keys(params)
-
-   for i = 1, #keys do
-      local name = keys[i]
-      local values = params[name]
-      local new_combos = {}
-
-      for j = 1, #combos do
-         local combo = combos[j]
-         for k = 1, #values do
-            local new_combo = shallow_copy(combo)
-            new_combo[name] = values[k]
-            new_combos[#new_combos + 1] = new_combo
-         end
-      end
-
-      combos = new_combos
-   end
-
-   return combos
-end
-
--- Offset above 0.5 to handle floating-point edge cases in rounding
-local ROUNDING_EPSILON = 0.50000000000008
-
----@param num number
----@param precision number
----@return number
-local function math_round(num, precision)
-   precision = precision or 0
-   local mul = 10 ^ precision
-   local rounded
-   if num > 0 then
-      rounded = math_floor(num * mul + ROUNDING_EPSILON) / mul
-   else
-      rounded = math.ceil(num * mul - ROUNDING_EPSILON) / mul
-   end
-   return math.max(rounded, 10 ^ -precision)
-end
-
 -- ----------------------------------------------------------------------------
 -- Statistics
 -- ----------------------------------------------------------------------------
-
-local BOOTSTRAP_RESAMPLES = 10000
 
 --- Calculate median of a sorted array.
 ---@param sorted number[] Sorted array of numbers.
@@ -404,23 +293,40 @@ local function rank(results, key)
    local prev_value = min_value
    local current_rank = 1
    for i, entry in ipairs(sorted) do
-      if entry.value ~= prev_value then
+      local name, value = entry.name, entry.value
+      if value ~= prev_value then
          current_rank = i
-         prev_value = entry.value
+         prev_value = value
       end
-      results[entry.name].rank = current_rank
+      results[name].rank = current_rank
       if current_rank == 1 or min_value == 0 then
-         results[entry.name].ratio = 1
+         results[name].ratio = 1
       else
-         results[entry.name].ratio = entry.value / min_value
+         results[name].ratio = value / min_value
       end
    end
    return results
 end
 
 -- ----------------------------------------------------------------------------
--- Pretty Printing
+-- Rendering
 -- ----------------------------------------------------------------------------
+
+---@return integer
+local get_term_width
+do
+   local ok, system = pcall(require, "system")
+   if ok and system.termsize then
+      get_term_width = function()
+         local rows, cols = system.termsize()
+         return rows and cols or DEFAULT_TERM_WIDTH
+      end
+   else
+      get_term_width = function()
+         return DEFAULT_TERM_WIDTH
+      end
+   end
+end
 
 ---@alias default_unit `s` | `kb` | `count`
 
@@ -454,10 +360,90 @@ local UNIT_TABLES = {
    count = COUNT_UNITS,
 }
 
+local BAR_CHAR = "█"
+local BAR_MAX_WIDTH = 20
+local BAR_MIN_WIDTH = 10
+local NAME_MIN_WIDTH = 4
+local ELLIPSIS = "..."
+local EMBEDDED_BAR_WIDTH = 8
+
+local SUMMARIZE_HEADERS = {
+   "name",
+   "rank",
+   "ratio",
+   "median",
+   "ci_low",
+   "ci_high",
+   "ops",
+   "iters",
+}
+
+local HEADER_LABELS = {
+   name = "Name",
+   rank = "Rank",
+   ratio = "Ratio",
+   median = "Median",
+   ci_low = "CI Low",
+   ci_high = "CI High",
+   ops = "Ops",
+   iters = "Iters",
+}
+
 ---@param str string
 ---@return string
 local function trim_zeroes(str)
    return (str:gsub("%.?0+$", ""))
+end
+
+--- Count display width (UTF-8 aware). Counts characters, not bytes.
+---@param str string
+---@return integer
+local function display_width(str)
+   -- Count bytes that are NOT UTF-8 continuation bytes (0x80-0xBF)
+   local width = 0
+   for i = 1, #str do
+      local byte = string.byte(str, i)
+      if byte < 0x80 or byte >= 0xC0 then
+         width = width + 1
+      end
+   end
+   return width
+end
+
+---@param str string
+---@param width integer
+---@return string
+local function pad(str, width)
+   return str .. string.rep(" ", width - display_width(str))
+end
+
+---@param str string
+---@param width integer
+---@return string
+local function center(str, width)
+   local total_padding = math.max(0, width - display_width(str))
+   local left_padding = math_floor(total_padding / 2)
+   local right_padding = total_padding - left_padding
+   return string.rep(" ", left_padding) .. str .. string.rep(" ", right_padding)
+end
+
+---@param t string[]
+---@return string
+local function concat_line(t)
+   return table.concat(t, "  ")
+end
+
+---@param name string
+---@param max_len integer
+---@return string
+local function truncate_name(name, max_len)
+   if #name <= max_len then
+      return name
+   end
+   if max_len <= #ELLIPSIS then
+      return name:sub(1, max_len)
+   end
+   return name:sub(1, max_len - #ELLIPSIS) .. ELLIPSIS
 end
 
 --- Format a value to a human-readable string with appropriate unit suffix.
@@ -508,62 +494,55 @@ local function format_row(stats)
    }
 end
 
---- Count display width (UTF-8 aware). Counts characters, not bytes.
----@param str string
----@return integer
-local function display_width(str)
-   -- Count bytes that are NOT UTF-8 continuation bytes (0x80-0xBF)
-   local width = 0
-   for i = 1, #str do
-      local byte = string.byte(str, i)
-      if byte < 0x80 or byte >= 0xC0 then
-         width = width + 1
+---Calculate column widths based on header and row content.
+---@param rows table[]
+---@return integer[]
+local function calculate_column_widths(rows)
+   local widths = {}
+   for i = 1, #SUMMARIZE_HEADERS do
+      local header = SUMMARIZE_HEADERS[i]
+      widths[i] = display_width(header)
+      for j = 1, #rows do
+         widths[i] = math.max(widths[i], display_width(rows[j][header] or ""))
       end
    end
-   return width
+   return widths
 end
 
----@param str string
----@param width integer
----@return string
-local function pad(str, width)
-   return str .. string.rep(" ", width - display_width(str))
-end
-
----@param str string
----@param width integer
----@return string
-local function center(str, width)
-   local total_padding = math.max(0, width - display_width(str))
-   local left_padding = math_floor(total_padding / 2)
-   local right_padding = total_padding - left_padding
-   return string.rep(" ", left_padding) .. str .. string.rep(" ", right_padding)
-end
-
----@param t string[]
----@return string
-local function concat_line(t)
-   return table.concat(t, "  ")
-end
-
-local BAR_CHAR = "█"
-local BAR_MAX_WIDTH = 20
-local BAR_MIN_WIDTH = 10
-local NAME_MIN_WIDTH = 4
-local ELLIPSIS = "..."
-local EMBEDDED_BAR_WIDTH = 8
-
----@param name string
----@param max_len integer
----@return string
-local function truncate_name(name, max_len)
-   if #name <= max_len then
-      return name
+---Truncate names to fit within terminal width (for plain format).
+---Mutates rows and widths in place.
+---@param rows table[]
+---@param widths integer[]
+---@param max_width integer
+local function fit_names(rows, widths, max_width)
+   local other_width = 0
+   for i = 2, #SUMMARIZE_HEADERS do
+      other_width = other_width + widths[i]
    end
-   if max_len <= #ELLIPSIS then
-      return name:sub(1, max_len)
+   local bar_col_width = EMBEDDED_BAR_WIDTH + 2
+   local max_name = math.max(
+      NAME_MIN_WIDTH,
+      max_width - other_width - (#SUMMARIZE_HEADERS - 1) * 2 - bar_col_width
+   )
+   if widths[1] > max_name then
+      widths[1] = max_name
+      for i = 1, #rows do
+         rows[i].name = truncate_name(rows[i].name, max_name)
+      end
    end
-   return name:sub(1, max_len - #ELLIPSIS) .. ELLIPSIS
+end
+
+---Build combined bar + ratio label (e.g., "█████ 1.00x")
+---Bar is padded to fixed width so ratio labels align.
+---@param ratio_str string
+---@param bar_width integer Display width of the bar (number of █ characters)
+---@param max_ratio_width integer
+---@return string
+local function build_ratio_bar(ratio_str, bar_width, max_ratio_width)
+   local bar = string.rep(BAR_CHAR, bar_width)
+   local padded_bar = bar .. string.rep(" ", EMBEDDED_BAR_WIDTH - bar_width)
+   local padded_ratio = string.rep(" ", max_ratio_width - #ratio_str) .. ratio_str
+   return padded_bar .. " " .. padded_ratio .. "x"
 end
 
 ---Render compact bar chart.
@@ -600,79 +579,6 @@ local function render_bar_chart(rows, max_width)
       lines[i] = string.format("%s  |%s %sx (%s)", name, bar, row.ratio, row.median)
    end
    return lines
-end
-
-local SUMMARIZE_HEADERS = {
-   "name",
-   "rank",
-   "ratio",
-   "median",
-   "ci_low",
-   "ci_high",
-   "ops",
-   "iters",
-}
-
-local HEADER_LABELS = {
-   name = "Name",
-   rank = "Rank",
-   ratio = "Ratio",
-   median = "Median",
-   ci_low = "CI Low",
-   ci_high = "CI High",
-   ops = "Ops",
-   iters = "Iters",
-}
-
----Calculate column widths based on header and row content.
----@param rows table[]
----@return integer[]
-local function calculate_column_widths(rows)
-   local widths = {}
-   for i = 1, #SUMMARIZE_HEADERS do
-      local header = SUMMARIZE_HEADERS[i]
-      widths[i] = display_width(header)
-      for j = 1, #rows do
-         widths[i] = math.max(widths[i], display_width(rows[j][header] or ""))
-      end
-   end
-   return widths
-end
-
----Truncate names to fit within terminal width (for plain format).
----Mutates rows and widths in place.
----@param rows table[]
----@param widths integer[]
----@param max_width integer
-local function truncate_names_to_fit(rows, widths, max_width)
-   local other_width = 0
-   for i = 2, #SUMMARIZE_HEADERS do
-      other_width = other_width + widths[i]
-   end
-   local bar_col_width = EMBEDDED_BAR_WIDTH + 2
-   local max_name = math.max(
-      NAME_MIN_WIDTH,
-      max_width - other_width - (#SUMMARIZE_HEADERS - 1) * 2 - bar_col_width
-   )
-   if widths[1] > max_name then
-      widths[1] = max_name
-      for i = 1, #rows do
-         rows[i].name = truncate_name(rows[i].name, max_name)
-      end
-   end
-end
-
----Build combined bar + ratio label (e.g., "█████ 1.00x")
----Bar is padded to fixed width so ratio labels align.
----@param ratio_str string
----@param bar_width integer Display width of the bar (number of █ characters)
----@param max_ratio_width integer
----@return string
-local function build_ratio_bar(ratio_str, bar_width, max_ratio_width)
-   local bar = string.rep(BAR_CHAR, bar_width)
-   local padded_bar = bar .. string.rep(" ", EMBEDDED_BAR_WIDTH - bar_width)
-   local padded_ratio = string.rep(" ", max_ratio_width - #ratio_str) .. ratio_str
-   return padded_bar .. " " .. padded_ratio .. "x"
 end
 
 ---Render plain text table with embedded bar chart in ratio column.
@@ -717,8 +623,43 @@ local function render_plain_table(rows, widths)
    return table.concat(lines, "\n")
 end
 
+---Render summary table (plain/compact).
+---@param results {[string]: luamark.Stats|luamark.Result}
+---@param format "plain"|"compact"
+---@param max_width? integer
+---@return string
+local function render_summary(results, format, max_width)
+   results = rank(results, "median")
+
+   local sorted_names = {}
+   for name in pairs(results) do
+      sorted_names[#sorted_names + 1] = name
+   end
+   table_sort(sorted_names, function(a, b)
+      return results[a].rank < results[b].rank
+   end)
+
+   local rows = {}
+   for i = 1, #sorted_names do
+      local name = sorted_names[i]
+      local row = format_row(results[name])
+      row.name = name
+      rows[i] = row
+   end
+
+   max_width = max_width or get_term_width()
+
+   if format == "compact" then
+      return table.concat(render_bar_chart(rows, max_width), "\n")
+   end
+
+   local widths = calculate_column_widths(rows)
+   fit_names(rows, widths, max_width)
+   return render_plain_table(rows, widths)
+end
+
 -- ----------------------------------------------------------------------------
--- Parameterized result helpers
+-- Result helpers
 -- ----------------------------------------------------------------------------
 
 ---@class luamark.Result : luamark.BaseStats
@@ -824,44 +765,83 @@ local function rank_results(results, param_names)
    end
 end
 
----Render summary table (plain/compact).
----@param results {[string]: luamark.Stats|luamark.Result}
----@param format "plain"|"compact"
----@param max_width? integer
----@return string
-local function render_summary(results, format, max_width)
-   results = rank(results, "median")
-
-   local sorted_names = {}
-   for name in pairs(results) do
-      sorted_names[#sorted_names + 1] = name
-   end
-   table_sort(sorted_names, function(a, b)
-      return results[a].rank < results[b].rank
-   end)
-
-   local rows = {}
-   for i = 1, #sorted_names do
-      local name = sorted_names[i]
-      local row = format_row(results[name])
-      row.name = name
-      rows[i] = row
-   end
-
-   max_width = max_width or get_term_width()
-
-   if format == "compact" then
-      return table.concat(render_bar_chart(rows, max_width), "\n")
-   end
-
-   local widths = calculate_column_widths(rows)
-   truncate_names_to_fit(rows, widths, max_width)
-   return render_plain_table(rows, widths)
-end
-
 -- ----------------------------------------------------------------------------
 -- Benchmark
 -- ----------------------------------------------------------------------------
+
+---@generic K, V
+---@param tbl table<K, V>
+---@return table<K, V>
+local function shallow_copy(tbl)
+   local copy = {}
+   for key, value in pairs(tbl) do
+      copy[key] = value
+   end
+   return copy
+end
+
+local MAX_PARAM_COMBINATIONS = 10000
+
+---@param params table<string, any[]>?
+---@return table[] # Array of param combinations
+local function expand_params(params)
+   if not params or not next(params) then
+      return { {} }
+   end
+
+   local total_combinations = 1
+   for _, values in pairs(params) do
+      total_combinations = total_combinations * #values
+      if total_combinations > MAX_PARAM_COMBINATIONS then
+         error(
+            string.format(
+               "Too many parameter combinations (exceeds %d). Reduce the number of parameter values.",
+               MAX_PARAM_COMBINATIONS
+            )
+         )
+      end
+   end
+
+   local combos = { {} }
+   local keys = sorted_keys(params)
+
+   for i = 1, #keys do
+      local name = keys[i]
+      local values = params[name]
+      local new_combos = {}
+
+      for j = 1, #combos do
+         local combo = combos[j]
+         for k = 1, #values do
+            local new_combo = shallow_copy(combo)
+            new_combo[name] = values[k]
+            new_combos[#new_combos + 1] = new_combo
+         end
+      end
+
+      combos = new_combos
+   end
+
+   return combos
+end
+
+-- Offset above 0.5 to handle floating-point edge cases in rounding
+local ROUNDING_EPSILON = 0.50000000000008
+
+---@param num number
+---@param precision number
+---@return number
+local function math_round(num, precision)
+   precision = precision or 0
+   local mul = 10 ^ precision
+   local rounded
+   if num > 0 then
+      rounded = math_floor(num * mul + ROUNDING_EPSILON) / mul
+   else
+      rounded = math.ceil(num * mul - ROUNDING_EPSILON) / mul
+   end
+   return math.max(rounded, 10 ^ -precision)
+end
 
 ---@alias Measure fun(fn: function, iterations: integer, setup?: function, teardown?: function, get_ctx?: function, params?: table): number, number
 
@@ -933,7 +913,6 @@ local function calibrate_iterations(fn, setup, teardown, get_ctx, params)
       end
 
       local scale = total_time > 0 and (min_time / total_time) or ZERO_TIME_SCALE
-
       iterations = math.ceil(iterations * scale)
 
       if iterations >= MAX_ITERATIONS then
@@ -975,6 +954,115 @@ local function validate_benchmark_args(fn, rounds, time, setup, teardown, before
          value == nil or type(value) == "function",
          string.format("'%s' must be a function", name)
       )
+   end
+end
+
+local COMMON_OPTS = {
+   rounds = "number",
+   time = "number",
+   setup = "function",
+   teardown = "function",
+   before = "function",
+   after = "function",
+}
+
+local SUITE_ONLY_OPTS = {
+   params = "table",
+}
+
+--- Validate options against allowed types.
+---@param opts table Options to validate.
+---@param extra_opts? table<string, string> Additional valid options beyond COMMON_OPTS.
+local function validate_options(opts, extra_opts)
+   for key, value in pairs(opts) do
+      local expected_type = COMMON_OPTS[key] or (extra_opts and extra_opts[key])
+      if not expected_type then
+         error("Unknown option: " .. key)
+      end
+      if type(value) ~= expected_type then
+         error(string.format("Option '%s' should be %s", key, expected_type))
+      end
+   end
+
+   if opts.rounds and opts.rounds ~= math_floor(opts.rounds) then
+      error("Option 'rounds' must be an integer")
+   end
+end
+
+--- Validate params table structure.
+---@param params table<string, ParamValue[]> Parameter combinations.
+local function validate_params(params)
+   for name, values in pairs(params) do
+      if type(name) ~= "string" then
+         error(string.format("params key must be a string, got %s", type(name)))
+      end
+      if type(values) ~= "table" then
+         error(string.format("params['%s'] must be an array, got %s", name, type(values)))
+      end
+      if #values == 0 then
+         error(string.format("params['%s'] must not be empty", name))
+      end
+      for i, v in ipairs(values) do
+         local vtype = type(v)
+         if vtype ~= "string" and vtype ~= "number" and vtype ~= "boolean" then
+            error(
+               string.format(
+                  "params['%s'][%d] must be string, number, or boolean, got %s",
+                  name,
+                  i,
+                  vtype
+               )
+            )
+         end
+      end
+   end
+end
+
+---@class luamark.Options Benchmark configuration for timeit/memit.
+---@field rounds? integer Target number of benchmark rounds.
+---@field time? number Target duration in seconds.
+---@field setup? fun(): any Function executed once before benchmark; returns context.
+---@field teardown? fun(ctx?: any) Function executed once after benchmark.
+---@field before? fun(ctx?: any): any Function executed before each iteration.
+---@field after? fun(ctx?: any) Function executed after each iteration.
+
+---@class luamark.SuiteOptions : luamark.Options Configuration for compare_time/compare_memory.
+---@field setup? fun(p: table): any Function executed once before benchmark; receives params, returns context.
+---@field teardown? fun(ctx: any, p: table) Function executed once after benchmark.
+---@field before? fun(ctx: any, p: table): any Function executed before each iteration.
+---@field after? fun(ctx: any, p: table) Function executed after each iteration.
+---@field params? table<string, ParamValue[]> Parameter combinations to benchmark across.
+
+--- Validate options for single API (timeit/memit).
+--- Rejects params option with helpful error message.
+---@param opts luamark.Options Options to validate.
+local function validate_single_options(opts)
+   ---@diagnostic disable-next-line: undefined-field
+   if opts.params then
+      error("'params' is not supported in timeit/memit. Use compare_time/compare_memory instead.")
+   end
+   validate_options(opts)
+end
+
+--- Validate options for suite API (compare_time/compare_memory).
+---@param opts luamark.SuiteOptions Options to validate.
+local function validate_suite_options(opts)
+   validate_options(opts, SUITE_ONLY_OPTS)
+   if opts.params then
+      validate_params(opts.params)
+   end
+end
+
+--- Validate funcs table for suite API (compare_time/compare_memory).
+--- Rejects numeric keys (arrays) since function names must be strings.
+---@param funcs table Table of functions to validate.
+local function validate_funcs(funcs)
+   for key in pairs(funcs) do
+      if type(key) ~= "string" then
+         error(
+            "'funcs' keys must be strings, got " .. type(key) .. ". Use named keys: { name = fn }"
+         )
+      end
    end
 end
 
@@ -1176,8 +1264,8 @@ local function parse_spec(spec)
    end
    assert(type(spec) == "table", "spec must be a function or table")
    assert(type(spec.fn) == "function", "spec.fn must be a function")
-   assert(spec.before == nil or type(spec.before) == "function", "spec.before must be a function")
-   assert(spec.after == nil or type(spec.after) == "function", "spec.after must be a function")
+   assert(not spec.before or type(spec.before) == "function", "spec.before must be a function")
+   assert(not spec.after or type(spec.after) == "function", "spec.after must be a function")
    return spec.fn, spec.before, spec.after
 end
 
@@ -1237,100 +1325,6 @@ local function benchmark_suite(funcs, measure, disable_gc, unit, opts)
    return results
 end
 
-local COMMON_OPTS = {
-   rounds = "number",
-   time = "number",
-   setup = "function",
-   teardown = "function",
-   before = "function",
-   after = "function",
-}
-
-local SUITE_ONLY_OPTS = {
-   params = "table",
-}
-
---- Validate options against allowed types.
----@param opts table Options to validate.
----@param extra_opts? table<string, string> Additional valid options beyond COMMON_OPTS.
-local function validate_options(opts, extra_opts)
-   for key, value in pairs(opts) do
-      local expected_type = COMMON_OPTS[key] or (extra_opts and extra_opts[key])
-      if not expected_type then
-         error("Unknown option: " .. key)
-      end
-      if type(value) ~= expected_type then
-         error(string.format("Option '%s' should be %s", key, expected_type))
-      end
-   end
-
-   if opts.rounds and opts.rounds ~= math_floor(opts.rounds) then
-      error("Option 'rounds' must be an integer")
-   end
-end
-
---- Validate params table structure.
----@param params table<string, ParamValue[]> Parameter combinations.
-local function validate_params(params)
-   for name, values in pairs(params) do
-      if type(name) ~= "string" then
-         error(string.format("params key must be a string, got %s", type(name)))
-      end
-      if type(values) ~= "table" then
-         error(string.format("params['%s'] must be an array, got %s", name, type(values)))
-      end
-      if #values == 0 then
-         error(string.format("params['%s'] must not be empty", name))
-      end
-      for i, v in ipairs(values) do
-         local vtype = type(v)
-         if vtype ~= "string" and vtype ~= "number" and vtype ~= "boolean" then
-            error(
-               string.format(
-                  "params['%s'][%d] must be string, number, or boolean, got %s",
-                  name,
-                  i,
-                  vtype
-               )
-            )
-         end
-      end
-   end
-end
-
---- Validate options for single API (timeit/memit).
---- Rejects params option with helpful error message.
----@param opts luamark.Options Options to validate.
-local function validate_single_options(opts)
-   ---@diagnostic disable-next-line: undefined-field
-   if opts.params then
-      error("'params' is not supported in timeit/memit. Use compare_time/compare_memory instead.")
-   end
-   validate_options(opts)
-end
-
---- Validate options for suite API (compare_time/compare_memory).
----@param opts luamark.SuiteOptions Options to validate.
-local function validate_suite_options(opts)
-   validate_options(opts, SUITE_ONLY_OPTS)
-   if opts.params then
-      validate_params(opts.params)
-   end
-end
-
---- Validate funcs table for suite API (compare_time/compare_memory).
---- Rejects numeric keys (arrays) since function names must be strings.
----@param funcs table Table of functions to validate.
-local function validate_funcs(funcs)
-   for key in pairs(funcs) do
-      if type(key) ~= "string" then
-         error(
-            "'funcs' keys must be strings, got " .. type(key) .. ". Use named keys: { name = fn }"
-         )
-      end
-   end
-end
-
 -- ----------------------------------------------------------------------------
 -- Public API
 -- ----------------------------------------------------------------------------
@@ -1345,18 +1339,9 @@ function luamark.render(results, short, max_width)
 
    max_width = max_width or get_term_width()
    local format = short and "compact" or "plain"
-
    local param_names = collect_param_names(results)
-   local has_params = #param_names > 0
 
-   if not has_params then
-      local by_name = {}
-      for i = 1, #results do
-         by_name[results[i].name] = results[i]
-      end
-      return render_summary(by_name, format, max_width)
-   end
-
+   -- Group by params (single group with key "" if no params)
    local groups = {} ---@type table<string, {[string]: luamark.Result}>
    for i = 1, #results do
       local row = results[i]
@@ -1365,19 +1350,21 @@ function luamark.render(results, short, max_width)
       groups[key][row.name] = row
    end
 
-   local output = {}
    local group_keys = sorted_keys(groups)
+
+   if #group_keys == 1 then
+      return render_summary(groups[group_keys[1]], format, max_width)
+   end
+
+   -- Multiple groups = add param headers
+   local output = {}
    for i = 1, #group_keys do
-      local param_key = group_keys[i]
-      local group = groups[param_key]
-
-      if param_key ~= "" then
-         output[#output + 1] = param_key
+      local key = group_keys[i]
+      if key ~= "" then
+         output[#output + 1] = key
       end
-
-      local formatted = render_summary(group, format, max_width)
-      output[#output + 1] = formatted
-      output[#output + 1] = "" -- blank line between groups
+      output[#output + 1] = render_summary(groups[key], format, max_width)
+      output[#output + 1] = ""
    end
 
    return table.concat(output, "\n")
