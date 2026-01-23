@@ -10,15 +10,29 @@ local luamark = {
 -- Config
 -- ----------------------------------------------------------------------------
 
+-- Config defaults balance accuracy vs runtime across function speeds:
+-- (config.time=5s, config.rounds=100, MAX_ROUNDS=1000, RESAMPLES=10000)
+--
+-- | Function    | Duration | Rounds | Iterations | Bootstrap | Total  |
+-- |-------------|----------|--------|------------|-----------|--------|
+-- | Very fast   | ~1μs     | 1,000  | 1,000+     | ~100ms    | ~100ms |
+-- | Fast        | ~100μs   | 1,000  | 1          | ~100ms    | ~200ms |
+-- | Medium      | ~10ms    | 500    | 1          | ~50ms     | ~5s    |
+-- | Slow        | ~500ms   | 100    | 1          | ~10ms     | ~50s   |
+--
+-- MAX_ROUNDS caps fast functions to prevent excessive bootstrap overhead.
+-- BOOTSTRAP_RESAMPLES (10k) provides accurate 95% CI for median.
+
 local CALIBRATION_PRECISION = 5
 local MEMORY_PRECISION = 4
 local BYTES_TO_KB = 1024
 local MAX_CALIBRATION_ATTEMPTS = 10
 local MAX_ITERATIONS = 1e6
+local MAX_ROUNDS = 1000
 
 local config = {
    rounds = 100,
-   time = 1,
+   time = 5,
 }
 
 -- ----------------------------------------------------------------------------
@@ -29,8 +43,12 @@ local clock, clock_precision
 
 ---@return integer time The minimum measurable time difference based on clock precision
 local function get_min_clocktime()
-   return (10 ^ -clock_precision)
+   return 10 ^ -clock_precision
 end
+
+local math_floor = math.floor
+local math_random = math.random
+local table_sort = table.sort
 
 local CLOCK_PRIORITIES = { "chronos", "posix.time", "socket" }
 local NANO_TO_SEC = 1e-9
@@ -71,7 +89,7 @@ for _, name in ipairs(CLOCK_PRIORITIES) do
 end
 
 if not luamark.clock_name then
-   clock, clock_precision = os.clock, _VERSION == "Luau" and 5 or 3
+   clock, clock_precision = os.clock, 3
    luamark.clock_name = "os.clock"
 end
 
@@ -149,10 +167,7 @@ do
    if ok and system.termsize then
       get_term_width = function()
          local rows, cols = system.termsize()
-         if rows and cols then
-            return cols
-         end
-         return DEFAULT_TERM_WIDTH
+         return rows and cols or DEFAULT_TERM_WIDTH
       end
    else
       get_term_width = function()
@@ -173,7 +188,7 @@ local function sorted_keys(tbl)
    for key in pairs(tbl) do
       keys[#keys + 1] = key
    end
-   table.sort(keys)
+   table_sort(keys)
    return keys
 end
 
@@ -254,7 +269,7 @@ local function math_round(num, precision)
    local mul = 10 ^ precision
    local rounded
    if num > 0 then
-      rounded = math.floor(num * mul + ROUNDING_EPSILON) / mul
+      rounded = math_floor(num * mul + ROUNDING_EPSILON) / mul
    else
       rounded = math.ceil(num * mul - ROUNDING_EPSILON) / mul
    end
@@ -265,13 +280,67 @@ end
 -- Statistics
 -- ----------------------------------------------------------------------------
 
+local BOOTSTRAP_RESAMPLES = 10000
+
+--- Calculate median of a sorted array.
+---@param sorted number[] Sorted array of numbers.
+---@return number
+local function math_median(sorted)
+   local n = #sorted
+   local mid = math_floor(n / 2)
+   if n % 2 == 0 then
+      return (sorted[mid] + sorted[mid + 1]) / 2
+   end
+   return sorted[mid + 1]
+end
+
+--- Calculate median by reusing a pre-allocated array.
+--- Sorts the array in place and computes median.
+---@param bootstrap number[] Pre-allocated array to fill with resampled values.
+---@param samples number[] Source samples to resample from.
+---@param n integer Number of samples.
+---@return number
+local function resample_median(bootstrap, samples, n)
+   for j = 1, n do
+      bootstrap[j] = samples[math_random(n)]
+   end
+   table_sort(bootstrap)
+   return math_median(bootstrap)
+end
+
+--- Calculate 95% confidence interval for median using bootstrap resampling.
+---@param samples number[] Raw samples (will be sorted in place).
+---@param n_resamples integer Number of bootstrap resamples.
+---@return {lower: number, upper: number}
+local function bootstrap_ci(samples, n_resamples)
+   local n = #samples
+   local medians = {}
+   local bootstrap = {}
+
+   -- Pre-size the bootstrap array
+   for j = 1, n do
+      bootstrap[j] = 0
+   end
+
+   for i = 1, n_resamples do
+      medians[i] = resample_median(bootstrap, samples, n)
+   end
+   table_sort(medians)
+   -- Clamp indices to valid bounds (n_resamples < 40 would give index 0)
+   local lower_idx = math.max(1, math_floor(n_resamples * 0.025))
+   local upper_idx = math.min(n_resamples, math.ceil(n_resamples * 0.975))
+   return {
+      lower = medians[lower_idx],
+      upper = medians[upper_idx],
+   }
+end
+
 ---@class BaseStats
 ---@field count integer Number of samples collected.
----@field mean number Arithmetic mean of samples.
 ---@field median number Median value of samples.
----@field min number Minimum sample value.
----@field max number Maximum sample value.
----@field stddev number Standard deviation of samples.
+---@field ci_lower number Lower bound of 95% confidence interval for median.
+---@field ci_upper number Upper bound of 95% confidence interval for median.
+---@field ci_margin number Half-width of confidence interval ((upper - lower) / 2).
 ---@field total number Sum of all samples.
 ---@field samples number[] Raw samples (sorted).
 
@@ -280,51 +349,43 @@ end
 ---@field iterations integer Number of iterations per round.
 ---@field timestamp string ISO 8601 UTC timestamp of benchmark start.
 ---@field unit "s"|"kb" Measurement unit (seconds or kilobytes).
----@field ops? number Operations per second (1/mean). Only present for time benchmarks.
----@field rank? integer Rank when comparing multiple benchmarks.
+---@field ops? number Operations per second (1/median). Only present for time benchmarks.
 ---@field ratio? number Ratio relative to fastest benchmark.
+---@field rank? integer Rank accounting for CI overlap (tied results share the same rank).
+---@field is_approximate? boolean True if rank is approximate due to overlapping CIs.
 
 ---@param samples number[]
 ---@return BaseStats
 local function calculate_stats(samples)
    local count = #samples
 
-   table.sort(samples)
-   local mid = math.floor(count / 2)
-   local median
-   if count % 2 == 0 then
-      median = (samples[mid] + samples[mid + 1]) / 2
-   else
-      median = samples[mid + 1]
-   end
-
-   local min, max = samples[1], samples[count]
+   table_sort(samples)
+   local median = math_median(samples)
 
    local total = 0
    for i = 1, count do
       total = total + samples[i]
    end
 
-   local mean = total / count
-
-   local variance = 0
-   if count > 1 then
-      local sum_of_squares = 0
-      for i = 1, count do
-         local d = samples[i] - mean
-         sum_of_squares = sum_of_squares + d * d
-      end
-      variance = sum_of_squares / (count - 1)
+   local ci_lower, ci_upper, ci_margin
+   -- Bootstrap CI requires at least 3 samples for meaningful resampling variation
+   if count >= 3 then
+      local ci = bootstrap_ci(samples, BOOTSTRAP_RESAMPLES)
+      ci_lower = ci.lower
+      ci_upper = ci.upper
+      ci_margin = (ci_upper - ci_lower) / 2
+   else
+      ci_lower = median
+      ci_upper = median
+      ci_margin = 0
    end
-   local stddev = math.sqrt(variance)
 
    return {
       count = count,
-      mean = mean,
       median = median,
-      min = min,
-      max = max,
-      stddev = stddev,
+      ci_lower = ci_lower,
+      ci_upper = ci_upper,
+      ci_margin = ci_margin,
       total = total,
       samples = samples,
    }
@@ -343,7 +404,7 @@ local function rank(results, key)
       sorted[#sorted + 1] = { name = name, value = stats[key] }
    end
 
-   table.sort(sorted, function(a, b)
+   table_sort(sorted, function(a, b)
       return a.value < b.value
    end)
 
@@ -369,24 +430,36 @@ end
 -- Pretty Printing
 -- ----------------------------------------------------------------------------
 
----@alias default_unit `s` | `kb`
+---@alias default_unit `s` | `kb` | `count`
 
 -- Thresholds relative to input unit (seconds)
 local TIME_UNITS = {
-   { "m", 60 },
-   { "s", 1 },
-   { "ms", 1e-3 },
-   { "us", 1e-6 },
-   { "ns", 1e-9 },
+   { "m", 60, "%.2f" },
+   { "s", 1, "%.2f" },
+   { "ms", 1e-3, "%.2f" },
+   { "us", 1e-6, "%.2f" },
+   { "ns", 1e-9, "%.2f" },
 }
 
 -- Thresholds relative to input unit (kilobytes)
 local MEMORY_UNITS = {
-   { "TB", 1024 ^ 3 },
-   { "GB", 1024 ^ 2 },
-   { "MB", 1024 },
-   { "kB", 1 },
-   { "B", 1 / 1024 },
+   { "TB", 1024 ^ 3, "%.2f" },
+   { "GB", 1024 ^ 2, "%.2f" },
+   { "MB", 1024, "%.2f" },
+   { "kB", 1, "%.2f" },
+   { "B", 1 / 1024, "%.2f" },
+}
+
+local COUNT_UNITS = {
+   { "M", 1e6, "%.1f" },
+   { "k", 1e3, "%.1f" },
+   { "", 1, "%.1f" },
+}
+
+local UNIT_TABLES = {
+   s = TIME_UNITS,
+   kb = MEMORY_UNITS,
+   count = COUNT_UNITS,
 }
 
 ---@param str string
@@ -395,16 +468,17 @@ local function trim_zeroes(str)
    return (str:gsub("%.?0+$", ""))
 end
 
----@param value number
----@param base_unit default_unit
+--- Format a value to a human-readable string with appropriate unit suffix.
+---@param value number Value to format.
+---@param unit_type default_unit Unit type: "s" (time), "kb" (memory), or "count".
 ---@return string
-local function humanize(value, base_unit)
-   local units = base_unit == "s" and TIME_UNITS or MEMORY_UNITS
+local function humanize(value, unit_type)
+   local units = UNIT_TABLES[unit_type]
 
    for i = 1, #units do
-      local symbol, threshold = units[i][1], units[i][2]
+      local symbol, threshold, fmt = units[i][1], units[i][2], units[i][3]
       if value >= threshold then
-         return trim_zeroes(string.format("%.2f", value / threshold)) .. symbol
+         return trim_zeroes(string.format(fmt, value / threshold)) .. symbol
       end
    end
 
@@ -416,30 +490,29 @@ end
 ---@param unit default_unit
 ---@return string # A formatted string representing the statistical metrics.
 local function stats_tostring(stats, unit)
-   return string.format(
-      "%s ± %s per iter (%d rounds × %d iter)",
-      humanize(stats.mean, unit),
-      humanize(stats.stddev, unit),
-      stats.rounds,
-      stats.iterations
-   )
+   return humanize(stats.median, unit) .. " ± " .. humanize(stats.ci_margin, unit)
 end
 
 ---@param stats Stats
 ---@return table<string, string>
 local function format_row(stats)
    local unit = stats.unit
+   local rank_str = ""
+   if stats.rank then
+      if stats.is_approximate then
+         rank_str = "≈" .. stats.rank
+      else
+         rank_str = tostring(stats.rank)
+      end
+   end
    return {
-      rank = stats.rank and tostring(stats.rank) or "",
+      rank = rank_str,
       ratio = stats.ratio and string.format("%.2f", stats.ratio) or "",
       median = humanize(stats.median, unit),
-      mean = humanize(stats.mean, unit),
-      min = humanize(stats.min, unit),
-      max = humanize(stats.max, unit),
-      stddev = humanize(stats.stddev, unit),
+      ci_low = humanize(stats.ci_lower, unit),
+      ci_high = humanize(stats.ci_upper, unit),
       ops = stats.ops and (trim_zeroes(string.format("%.2f", stats.ops)) .. "/s") or "",
-      rounds = tostring(stats.rounds),
-      iterations = tostring(stats.iterations),
+      iters = stats.rounds .. " × " .. humanize(stats.iterations, "count"),
    }
 end
 
@@ -455,7 +528,7 @@ end
 ---@return string
 local function center(str, width)
    local total_padding = math.max(0, width - #str)
-   local left_padding = math.floor(total_padding / 2)
+   local left_padding = math_floor(total_padding / 2)
    local right_padding = total_padding - left_padding
    return string.rep(" ", left_padding) .. str .. string.rep(" ", right_padding)
 end
@@ -518,7 +591,7 @@ local function render_bar_chart(rows, max_width)
    for i = 1, #rows do
       local row = rows[i]
       local ratio = tonumber(row.ratio) or 1
-      local bar_width = math.max(1, math.floor((ratio / max_ratio) * bar_max))
+      local bar_width = math.max(1, math_floor((ratio / max_ratio) * bar_max))
       local name = pad(truncate_name(row.name, name_max), name_max)
       local bar = string.rep(BAR_CHAR, bar_width)
       lines[i] = string.format("%s  |%s %sx (%s)", name, bar, row.ratio, row.median)
@@ -531,13 +604,21 @@ local SUMMARIZE_HEADERS = {
    "rank",
    "ratio",
    "median",
-   "mean",
-   "min",
-   "max",
-   "stddev",
+   "ci_low",
+   "ci_high",
    "ops",
-   "rounds",
-   "iterations",
+   "iters",
+}
+
+local HEADER_LABELS = {
+   name = "Name",
+   rank = "Rank",
+   ratio = "Ratio",
+   median = "Median",
+   ci_low = "CI Low",
+   ci_high = "CI High",
+   ops = "Ops",
+   iters = "Iters",
 }
 
 ---Calculate column widths based on header and row content.
@@ -607,9 +688,7 @@ local function render_plain_table(rows, widths)
    local header_cells, underline_cells = {}, {}
    for i, header in ipairs(SUMMARIZE_HEADERS) do
       local width = (header == "ratio") and ratio_bar_width or widths[i]
-      local label = (header == "ratio") and "Ratio"
-         or (header == "ops") and "Op/s"
-         or header:gsub("^%l", string.upper)
+      local label = HEADER_LABELS[header]
       header_cells[#header_cells + 1] = center(label, width)
       underline_cells[#underline_cells + 1] = string.rep("-", width)
    end
@@ -622,7 +701,7 @@ local function render_plain_table(rows, widths)
       for i, header in ipairs(SUMMARIZE_HEADERS) do
          if header == "ratio" then
             local ratio = tonumber(row.ratio) or 1
-            local bar_width = math.max(1, math.floor((ratio / max_ratio) * EMBEDDED_BAR_WIDTH))
+            local bar_width = math.max(1, math_floor((ratio / max_ratio) * EMBEDDED_BAR_WIDTH))
             cells[#cells + 1] =
                pad(build_ratio_bar(row.ratio, bar_width, max_ratio_width), ratio_bar_width)
          else
@@ -642,7 +721,7 @@ end
 local function render_markdown_table(rows, widths)
    local header_cells, underline_cells = {}, {}
    for i, header in ipairs(SUMMARIZE_HEADERS) do
-      local label = (header == "ops") and "Op/s" or header:gsub("^%l", string.upper)
+      local label = HEADER_LABELS[header]
       header_cells[#header_cells + 1] = center(label, widths[i])
       underline_cells[#underline_cells + 1] = string.rep("-", widths[i])
    end
@@ -684,6 +763,7 @@ end
 ---@field stats Stats Benchmark statistics.
 
 ---Rank benchmark results within each parameter combination.
+---Uses transitive overlap grouping: results with overlapping CIs share the same rank.
 ---@param results BenchmarkRow[]
 local function rank_results(results)
    local groups = {}
@@ -693,17 +773,30 @@ local function rank_results(results)
       groups[key] = groups[key] or {}
       groups[key][#groups[key] + 1] = row
    end
+
    for _, group in pairs(groups) do
-      table.sort(group, function(a, b)
+      table_sort(group, function(a, b)
          return a.stats.median < b.stats.median
       end)
-      local min_median = group[1].stats.median
-      for i = 1, #group do
-         group[i].stats.rank = i
-         if i == 1 or min_median == 0 then
-            group[i].stats.ratio = 1
+
+      local first = group[1].stats
+      local min_median = first.median
+      first.ratio = 1
+      first.rank = 1
+      first.is_approximate = false
+
+      for i = 2, #group do
+         local s = group[i].stats
+         local prev = group[i - 1].stats
+         s.ratio = min_median > 0 and (s.median / min_median) or 1
+
+         if s.ci_lower <= prev.ci_upper and prev.ci_lower <= s.ci_upper then
+            s.rank = prev.rank
+            s.is_approximate = true
+            prev.is_approximate = true
          else
-            group[i].stats.ratio = group[i].stats.median / min_median
+            s.rank = i
+            s.is_approximate = false
          end
       end
    end
@@ -737,7 +830,7 @@ local function render_csv(rows)
    end
 
    -- Sort rows by name then params for consistent output
-   table.sort(rows, function(a, b)
+   table_sort(rows, function(a, b)
       if a.name ~= b.name then
          return a.name < b.name
       end
@@ -774,7 +867,7 @@ local function render_summary(results, format, max_width)
    for name in pairs(results) do
       sorted_names[#sorted_names + 1] = name
    end
-   table.sort(sorted_names, function(a, b)
+   table_sort(sorted_names, function(a, b)
       return results[a].rank < results[b].rank
    end)
 
@@ -896,7 +989,7 @@ local function calibrate_stop(round_duration)
    -- Guard against division by zero for extremely fast functions on low-precision clocks.
    local safe_duration = (round_duration > 0) and round_duration or get_min_clocktime()
    local time = math.max(config.rounds * safe_duration, config.time)
-   local rounds = math.ceil(time / safe_duration)
+   local rounds = math.min(MAX_ROUNDS, math.ceil(time / safe_duration))
    return rounds, time
 end
 
@@ -934,8 +1027,8 @@ local function build_stats_result(samples, rounds, iterations, timestamp, unit)
    stats.timestamp = timestamp
    stats.unit = unit
 
-   if unit == "s" and stats.mean > 0 then
-      stats.ops = 1 / stats.mean
+   if unit == "s" and stats.median > 0 then
+      stats.ops = 1 / stats.median
    end
 
    setmetatable(stats, {
@@ -1184,20 +1277,12 @@ local SUITE_ONLY_OPTS = {
    params = "table",
 }
 
---- Get the expected type for an option, checking common and extra option tables.
----@param key string Option name.
----@param extra_opts? table<string, string> Additional valid options.
----@return string? expected_type Expected type or nil if unknown option.
-local function get_option_type(key, extra_opts)
-   return COMMON_OPTS[key] or (extra_opts and extra_opts[key])
-end
-
 --- Validate options against allowed types.
 ---@param opts table Options to validate.
 ---@param extra_opts? table<string, string> Additional valid options beyond COMMON_OPTS.
 local function validate_options(opts, extra_opts)
    for key, value in pairs(opts) do
-      local expected_type = get_option_type(key, extra_opts)
+      local expected_type = COMMON_OPTS[key] or (extra_opts and extra_opts[key])
       if not expected_type then
          error("Unknown option: " .. key)
       end
@@ -1206,7 +1291,7 @@ local function validate_options(opts, extra_opts)
       end
    end
 
-   if opts.rounds and opts.rounds ~= math.floor(opts.rounds) then
+   if opts.rounds and opts.rounds ~= math_floor(opts.rounds) then
       error("Option 'rounds' must be an integer")
    end
 end
@@ -1441,26 +1526,34 @@ end
 ---@param pattern string Lua pattern to match module names against.
 ---@return integer count Number of modules unloaded.
 function luamark.unload(pattern)
-   local count = 0
+   local to_unload = {}
    for name in pairs(package.loaded) do
       if name:match(pattern) then
-         package.loaded[name] = nil
-         count = count + 1
+         to_unload[#to_unload + 1] = name
       end
    end
-   return count
+   for _, name in ipairs(to_unload) do
+      package.loaded[name] = nil
+   end
+   return #to_unload
 end
 
 if rawget(_G, "_TEST") then
    ---@package
    luamark._internal = {
+      BOOTSTRAP_RESAMPLES = BOOTSTRAP_RESAMPLES,
       CALIBRATION_PRECISION = CALIBRATION_PRECISION,
       DEFAULT_TERM_WIDTH = DEFAULT_TERM_WIDTH,
+      MAX_ROUNDS = MAX_ROUNDS,
+      bootstrap_ci = bootstrap_ci,
+      math_median = math_median,
       calculate_stats = calculate_stats,
       get_min_clocktime = get_min_clocktime,
+      humanize = humanize,
       measure_memory = measure_memory,
       measure_time = measure_time,
       rank = rank,
+      rank_results = rank_results,
    }
 end
 

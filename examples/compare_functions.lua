@@ -9,7 +9,8 @@ local luamark = require("luamark")
 -- ============================================================================
 -- Example 1: Basic compare_time
 -- ============================================================================
--- Compare string concatenation vs table.concat
+-- When results have overlapping confidence intervals, they share the same
+-- effective rank with an ≈ prefix (e.g., "≈1 ≈1 3" means ranks 1-2 overlap)
 
 print("=== Basic compare_time ===")
 local results1 = luamark.compare_time({
@@ -19,17 +20,25 @@ local results1 = luamark.compare_time({
          s = s .. i
       end
    end,
-   table_concat = function()
-      local t = {}
-      for i = 1, 100 do
-         t[i] = i
+   -- These two are statistically indistinguishable (random variation)
+   random_work_a = function()
+      local x = 0
+      for i = 1, 80 + math.random(40) do
+         x = x + i
       end
-      local _ = table.concat(t)
+   end,
+   random_work_b = function()
+      local x = 0
+      for i = 1, 80 + math.random(41) do
+         x = x + i
+      end
    end,
 })
 
 -- Results can be displayed via string conversion (uses luamark.summarize(..., "compact"))
+-- random_work_a and random_work_b will show ≈ ranks since their CIs overlap
 print(results1)
+print(luamark.summarize(results1, "plain"))
 
 -- ============================================================================
 -- Example 2: compare_memory

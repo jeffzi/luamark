@@ -13,7 +13,7 @@ execution time and memory usage with sensible defaults and optional high-precisi
 
 - **Measure time and memory** with optional precision via [Chronos][chronos],
   [LuaPosix][luaposix], [LuaSocket][luasocket], or [AllocSpy][allocspy]
-- **Statistics**: min, max, mean, median, standard deviation
+- **Statistics**: median with 95% confidence intervals
 - **Ready to use** with sensible defaults
 
 [chronos]: https://github.com/ldrumm/chronos
@@ -41,12 +41,19 @@ Alternatively, you can manually include [luamark.lua](src/luamark.lua) in your p
 
 ### API Overview
 
-| Function | Input | Returns | `params` |
-| -------- | ----- | ------- | -------- |
-| [`timeit`](docs/api.md#timeit) | single function | [`Stats`](docs/api.md#stats) | No |
-| [`memit`](docs/api.md#memit) | single function | [`Stats`](docs/api.md#stats) | No |
-| [`compare_time`](docs/api.md#compare_time) | table of functions | [`BenchmarkRow[]`](docs/api.md#benchmarkrow) | Yes |
-| [`compare_memory`](docs/api.md#compare_memory) | table of functions | [`BenchmarkRow[]`](docs/api.md#benchmarkrow) | Yes |
+| Function              | Input              | Returns               | `params` |
+| --------------------- | ------------------ | --------------------- | -------- |
+| [`timeit`][1]         | single function    | [`Stats`][5]          | No       |
+| [`memit`][2]          | single function    | [`Stats`][5]          | No       |
+| [`compare_time`][3]   | table of functions | [`BenchmarkRow[]`][6] | Yes      |
+| [`compare_memory`][4] | table of functions | [`BenchmarkRow[]`][6] | Yes      |
+
+[1]: docs/api.md#timeit
+[2]: docs/api.md#memit
+[3]: docs/api.md#compare_time
+[4]: docs/api.md#compare_memory
+[5]: docs/api.md#stats
+[6]: docs/api.md#benchmarkrow
 
 ### Single Function
 
@@ -65,7 +72,7 @@ local stats = luamark.timeit(function()
 end)
 
 print(stats)
--- Output: 25.01ns ± 80.26ns per iter (727283 rounds × 1 iter)
+-- Output: 250ns ± 0ns
 ```
 
 Measure memory allocation:
@@ -79,7 +86,7 @@ local stats = luamark.memit(function()
 end)
 
 print(stats)
--- Output: 1.07kB ± 21.96B per iter (1768 rounds × 1 iter)
+-- Output: 2.05kB ± 0B
 ```
 
 ### Comparing Functions
@@ -111,17 +118,20 @@ print(luamark.summarize(results, "plain"))  -- detailed output
 
 ```text
 n=100
-    Name      Rank      Ratio       Median   Mean    Min    Max     Stddev    Iters
-------------  ----  --------------  ------  ------  -----  ------  --------  -------
-table_concat  1     ██       1.00x  292ns   300ns   167ns  27us    196ns     100 × 1
-loop          2     ████████ 3.42x  1us     1.01us  875ns  27.4us  417ns     100 × 1
+    Name      Rank      Ratio       Median  CI Low  CI High      Ops        Iters
+------------  ----  --------------  ------  ------  -------  -----------  ---------
+table_concat  1     █        1.00x  1.17us  1.12us  1.17us   856898.03/s  1000 × 1
+loop          2     ████████ 4.18x  4.88us  4.83us  4.96us   205128.21/s  1000 × 1
 
 n=1000
-    Name      Rank       Ratio       Median   Mean    Min     Max     Stddev   Iters
-------------  ----  ---------------  -------  ------  ------  ------  -------  -------
-table_concat  1     █         1.00x  4.04us   4.2us   3.79us  91us    940ns    100 × 1
-loop          2     ████████ 13.17x  53.25us  55us    50.5us  256us   5.44us   100 × 1
+    Name      Rank       Ratio        Median    CI Low   CI High      Ops        Iters
+------------  ----  ---------------  --------  --------  --------  ----------  ---------
+table_concat  1     █         1.00x  12.12us   12.04us   12.21us   82474.23/s  1000 × 1
+loop          2     ████████ 14.98x  181.58us  180.83us  182.33us  5507.12/s   1000 × 1
 ```
+
+When results have overlapping confidence intervals, they share the same rank with
+an `≈` prefix (e.g., `≈1 ≈1 3`), indicating they are statistically indistinguishable.
 
 ## Technical Details
 
@@ -130,10 +140,11 @@ loop          2     ████████ 13.17x  53.25us  55us    50.5us  25
 LuaMark provides two configuration options:
 
 - `rounds`: Target sample count (default: 100)
-- `time`: Target duration in seconds (default: 1)
+- `time`: Target duration in seconds (default: 5)
 
-Benchmarks run until **both** targets are met: at least `rounds` samples collected
-and at least `time` seconds elapsed.
+Benchmarks run until **either** target is met: `rounds` samples collected
+or `time` seconds elapsed. For very fast functions, rounds are capped at 1,000
+to prevent excessive runtime.
 
 Modify these settings directly:
 

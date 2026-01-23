@@ -36,8 +36,9 @@ for _, clock_name in ipairs(h.CLOCKS) do
                local benchmark = luamark[name]
                local stats = benchmark(h.noop, { rounds = 1 })
                assert_stats_valid(stats)
-               assert.is_number(stats.mean)
                assert.is_number(stats.median)
+               assert.is_number(stats.ci_lower)
+               assert.is_number(stats.ci_upper)
             end)
 
             test("respects round limit and tracks iterations" .. suffix, function()
@@ -106,28 +107,20 @@ for _, clock_name in ipairs(h.CLOCKS) do
 
       describe("timeit", function()
          test("computes timing stats and ops", function()
-            local long_sleep = SLEEP_TIME * 2
-            -- Use setup to reset state before each benchmark run, ensuring
-            -- the long sleep triggers during measurement, not calibration
-            local calls
-            local function counter()
-               calls = calls + 1
-               socket.sleep(calls == 5 and long_sleep or SLEEP_TIME)
-            end
-
-            local stats = luamark.timeit(counter, {
-               rounds = 100,
-               time = 1,
-               setup = function()
-                  calls = 0
-               end,
+            local stats = luamark.timeit(function()
+               socket.sleep(SLEEP_TIME)
+            end, {
+               rounds = 10,
+               time = 0.5,
             })
 
-            assert.is_near(SLEEP_TIME, stats.min, TIME_TOL)
-            assert.is_near(long_sleep, stats.max, TIME_TOL * 2)
-            assert.is_near(SLEEP_TIME, stats.mean, TIME_TOL)
+            assert.is_near(SLEEP_TIME, stats.median, TIME_TOL)
             assert.is_number(stats.ops)
-            assert.is_near(1 / stats.mean, stats.ops, 1e-10)
+            assert.is_near(1 / stats.median, stats.ops, 1e-10)
+            assert.is_number(stats.ci_lower)
+            assert.is_number(stats.ci_upper)
+            assert.is_true(stats.ci_lower <= stats.median)
+            assert.is_true(stats.ci_upper >= stats.median)
          end)
       end)
 
@@ -137,7 +130,7 @@ for _, clock_name in ipairs(h.CLOCKS) do
                socket.sleep(SLEEP_TIME)
             end, { rounds = 3 })
 
-            assert.is_near(SLEEP_TIME, stats.mean, TIME_TOL)
+            assert.is_near(SLEEP_TIME, stats.median, TIME_TOL)
          end)
 
          test("slow path (with before hook) measures time correctly", function()
@@ -148,7 +141,7 @@ for _, clock_name in ipairs(h.CLOCKS) do
                before = h.noop,
             })
 
-            assert.is_near(SLEEP_TIME, stats.mean, TIME_TOL)
+            assert.is_near(SLEEP_TIME, stats.median, TIME_TOL)
          end)
 
          test("slow path (with after hook) measures time correctly", function()
@@ -159,7 +152,7 @@ for _, clock_name in ipairs(h.CLOCKS) do
                after = h.noop,
             })
 
-            assert.is_near(SLEEP_TIME, stats.mean, TIME_TOL)
+            assert.is_near(SLEEP_TIME, stats.median, TIME_TOL)
          end)
 
          test("fast path has less overhead than slow path", function()
@@ -170,8 +163,8 @@ for _, clock_name in ipairs(h.CLOCKS) do
             local fast_stats = luamark.timeit(work, { rounds = 5 })
             local slow_stats = luamark.timeit(work, { rounds = 5, before = h.noop })
 
-            assert.is_near(fast_stats.mean, slow_stats.mean, TIME_TOL)
-            assert.is_true(fast_stats.mean <= slow_stats.mean + TIME_TOL)
+            assert.is_near(fast_stats.median, slow_stats.median, TIME_TOL)
+            assert.is_true(fast_stats.median <= slow_stats.median + TIME_TOL)
          end)
       end)
 
@@ -210,13 +203,36 @@ for _, clock_name in ipairs(h.CLOCKS) do
                for i = 1, #results do
                   local row = results[i]
                   local _, single_call_memory = luamark._internal.measure_memory(funcs[row.name], 1)
-                  assert.is_near(single_call_memory, row.stats.mean, MEMORY_TOL)
+                  assert.is_near(single_call_memory, row.stats.median, MEMORY_TOL)
                end
             end)
          end)
       end
    end)
 end
+
+describe("calibration", function()
+   local luamark
+
+   setup(function()
+      luamark = h.load_luamark()
+   end)
+
+   test("caps rounds at MAX_ROUNDS for fast functions", function()
+      local stats = luamark.timeit(h.noop, {})
+      assert.is_true(stats.rounds <= luamark._internal.MAX_ROUNDS)
+   end)
+
+   test("uses multiple iterations for very fast functions with low-precision clock", function()
+      -- Load luamark with os.clock (low precision) to ensure calibration needs iterations
+      local luamark_osclock = h.load_luamark(h.ALL_CLOCKS)
+      assert.are_equal("os.clock", luamark_osclock.clock_name)
+      local stats = luamark_osclock.timeit(h.noop, {})
+      -- Very fast functions (empty function ~1ns) need multiple iterations
+      -- to exceed clock precision threshold with low-precision clocks
+      assert.is_true(stats.iterations > 1)
+   end)
+end)
 
 describe("validation", function()
    local luamark

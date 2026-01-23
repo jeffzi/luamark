@@ -23,13 +23,17 @@ end, { rounds = 100 })
 
 -- Stats has a readable __tostring
 print(stats)
--- Example output: 809.07ns ± 4.69us per iter (100 rounds × 1 iter)
+-- Example output: 250ns ± 0ns
 
 -- Access individual stats fields (values are in seconds)
-print(string.format("Mean: %s", luamark.humanize_time(stats.mean)))
 print(string.format("Median: %s", luamark.humanize_time(stats.median)))
-print(string.format("Min: %s", luamark.humanize_time(stats.min)))
-print(string.format("Max: %s", luamark.humanize_time(stats.max)))
+print(
+   string.format(
+      "95%% CI: [%s, %s]",
+      luamark.humanize_time(stats.ci_lower),
+      luamark.humanize_time(stats.ci_upper)
+   )
+)
 print(string.format("Rounds: %d", stats.rounds))
 print(string.format("Iterations per round: %d", stats.iterations))
 

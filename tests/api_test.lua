@@ -87,9 +87,7 @@ describe("simple API (timeit/memit)", function()
       local stats = luamark.timeit(h.noop, { rounds = 3 })
       local str = tostring(stats)
 
-      assert.matches("per iter", str)
-      assert.matches("%d+ rounds", str)
-      assert.matches("%d+ iter", str)
+      assert.matches("±", str)
    end)
 end)
 

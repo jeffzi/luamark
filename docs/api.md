@@ -6,11 +6,12 @@ Set global configuration options directly on the module:
 
 ```lua
 luamark.rounds = 100  -- Target sample count
-luamark.time = 1      -- Target duration in seconds
+luamark.time = 5      -- Target duration in seconds
 ```
 
-Benchmarks run until **both** targets are met: at least `rounds` samples collected
-and at least `time` seconds elapsed.
+Benchmarks run until **either** target is met: `rounds` samples collected
+or `time` seconds elapsed. For very fast functions, rounds are capped at 1,000
+to prevent excessive runtime.
 
 ### clock_name
 
@@ -40,7 +41,7 @@ Use [`timeit`](#timeit) and [`memit`](#memit) to benchmark a single function.
 ### timeit
 
 ```lua
-function luamark.timeit(fn: fun(ctx?: any), opts?: SimpleOptions) -> Stats
+function luamark.timeit(fn: fun(ctx?: any), opts?: Options) -> Stats
 ```
 
 Benchmark a single function for execution time. Returns time in seconds.
@@ -50,14 +51,14 @@ local stats = luamark.timeit(function()
    -- code to benchmark
 end, { rounds = 10 })
 
-print(stats)  -- "1.5ms ± 0.1ms per iter (10 rounds × 1 iter)"
-print(stats.mean, stats.median)  -- Access individual fields
+print(stats)  -- "250ns ± 0ns"
+print(stats.median, stats.ci_margin)  -- Access individual fields
 ```
 
 ### memit
 
 ```lua
-function luamark.memit(fn: fun(ctx?: any), opts?: SimpleOptions) -> Stats
+function luamark.memit(fn: fun(ctx?: any), opts?: Options) -> Stats
 ```
 
 Benchmark a single function for memory usage. Returns memory in kilobytes.
@@ -68,13 +69,13 @@ local stats = luamark.memit(function()
    for i = 1, 1000 do t[i] = i end
 end, { rounds = 10 })
 
-print(stats)  -- "1.2kB ± 0.05kB per iter (10 rounds × 1 iter)"
+print(stats)  -- "18.82kB ± 0B"
 ```
 
-### SimpleOptions
+### Options
 
 ```lua
----@class SimpleOptions
+---@class Options
 ---@field rounds? integer Target number of benchmark rounds.
 ---@field time? number Target duration in seconds.
 ---@field setup? fun(): any Function executed once before benchmark; returns context.
@@ -83,7 +84,7 @@ print(stats)  -- "1.2kB ± 0.05kB per iter (10 rounds × 1 iter)"
 ---@field after? fun(ctx?: any) Function executed after each iteration.
 ```
 
-**Note:** The [`params`](#params) option is NOT supported in the single API.
+**Note:** The [`params`](#params) option is NOT supported in [`Options`](#options).
 Use [`compare_time`](#compare_time)/[`compare_memory`](#compare_memory) for parameterized benchmarks.
 In single mode, hooks receive only `ctx`, not params.
 
@@ -297,26 +298,31 @@ Returned by all benchmark functions. Has a `__tostring` metamethod for readable 
 
 ```lua
 local stats = luamark.timeit(fn, { rounds = 10 })
-print(stats)  -- "1.5ms ± 0.1ms per iter (10 rounds × 1 iter)"
+print(stats)  -- "250ns ± 0ns"
 ```
 
-| Field      | Type      | Description                                    |
-| ---------- | --------- | ---------------------------------------------- |
-| count      | integer   | Number of samples collected                    |
-| mean       | number    | Arithmetic mean of samples                     |
-| median     | number    | Median value of samples                        |
-| min        | number    | Minimum sample value                           |
-| max        | number    | Maximum sample value                           |
-| stddev     | number    | Standard deviation of samples                  |
-| total      | number    | Sum of all samples                             |
-| samples    | number[]  | Raw samples (sorted)                           |
-| rounds     | integer   | Number of benchmark rounds executed            |
-| iterations | integer   | Number of iterations per round                 |
-| timestamp  | string    | ISO 8601 UTC timestamp of benchmark start      |
-| unit       | "s"\|"kb" | Measurement unit (seconds or kilobytes)        |
-| ops        | number?   | Operations per second (time benchmarks only)   |
-| rank       | integer?  | Rank (only in `compare_*` results)             |
-| ratio      | number?   | Ratio to fastest (only in `compare_*` results) |
+| Field          | Type      | Description                                              |
+| -------------- | --------- | -------------------------------------------------------- |
+| count          | integer   | Number of samples collected                              |
+| median         | number    | Median value of samples                                  |
+| ci_lower       | number    | Lower bound of 95% CI for median                         |
+| ci_upper       | number    | Upper bound of 95% CI for median                         |
+| ci_margin      | number    | Half-width of CI ((upper - lower) / 2)                   |
+| total          | number    | Sum of all samples                                       |
+| samples        | number[]  | Raw samples (sorted)                                     |
+| rounds         | integer   | Number of benchmark rounds executed                      |
+| iterations     | integer   | Number of iterations per round                           |
+| timestamp      | string    | ISO 8601 UTC timestamp of benchmark start                |
+| unit           | "s"\|"kb" | Measurement unit (seconds or kilobytes)                  |
+| ops            | number?   | Operations per second (1/median, time benchmarks only)   |
+| rank           | integer?  | Rank accounting for CI overlap (`compare_*` only)        |
+| ratio          | number?   | Ratio to fastest (`compare_*` only)                      |
+| is_approximate | boolean?  | True if rank is tied due to CI overlap (`compare_*` only)|
+
+**Rank display:** When results have overlapping confidence intervals, they share the
+same rank with an `≈` prefix. For example, `≈1 ≈1 3` means the first two results have
+overlapping CIs (statistically indistinguishable), while the third is clearly slower.
+The gap in rank numbers (1 to 3) indicates skipped positions.
 
 ---
 
@@ -336,11 +342,11 @@ Return a string summarizing benchmark results.
 
 @_param_ `results` — Benchmark results ([`BenchmarkRow`](#benchmarkrow) array from [`compare_time`](#compare_time)/[`compare_memory`](#compare_memory)).
 
-@_param_ `format` — Output format (default: "plain").
+@_param_ `format` — Output format.
 
 ```lua
 format:
-    | "plain"    -- Table with embedded bar chart in ratio column
+    | "plain"    -- Table with embedded bar chart in ratio column (default)
     | "compact"  -- Bar chart only
     | "markdown" -- Markdown table (no bar chart)
     | "csv"      -- CSV format

@@ -23,13 +23,17 @@ end, { rounds = 100 })
 
 -- Stats has a readable __tostring
 print(stats)
--- Example output: 8.1kB ± 141.23B per iter (100 rounds × 1 iter)
+-- Example output: 138.19kB ± 0B
 
 -- Access individual stats fields (values are in kilobytes)
-print(string.format("Mean: %s", luamark.humanize_memory(stats.mean)))
 print(string.format("Median: %s", luamark.humanize_memory(stats.median)))
-print(string.format("Min: %s", luamark.humanize_memory(stats.min)))
-print(string.format("Max: %s", luamark.humanize_memory(stats.max)))
+print(
+   string.format(
+      "95%% CI: [%s, %s]",
+      luamark.humanize_memory(stats.ci_lower),
+      luamark.humanize_memory(stats.ci_upper)
+   )
+)
 print(string.format("Rounds: %d", stats.rounds))
 print(string.format("Iterations per round: %d", stats.iterations))
 
