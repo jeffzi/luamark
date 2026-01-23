@@ -6,7 +6,10 @@ local luamark = {
    _VERSION = "0.9.0",
 }
 
+local math_ceil = math.ceil
 local math_floor = math.floor
+local math_max = math.max
+local math_min = math.min
 local math_random = math.random
 local table_sort = table.sort
 
@@ -193,21 +196,25 @@ end
 ---@return {lower: number, upper: number}
 local function bootstrap_ci(samples, n_resamples)
    local n = #samples
-   local medians = {}
-   local bootstrap = {}
 
-   -- Pre-size the bootstrap array
+   -- Pre-allocate bootstrap array to avoid repeated allocations
+   local bootstrap = {}
    for j = 1, n do
       bootstrap[j] = 0
    end
 
+   -- Generate bootstrap distribution of medians
+   local medians = {}
    for i = 1, n_resamples do
       medians[i] = resample_median(bootstrap, samples, n)
    end
    table_sort(medians)
-   -- Clamp indices to valid bounds (n_resamples < 40 would give index 0)
-   local lower_idx = math.max(1, math_floor(n_resamples * 0.025))
-   local upper_idx = math.min(n_resamples, math.ceil(n_resamples * 0.975))
+
+   -- Extract 2.5th and 97.5th percentiles (95% CI bounds)
+   -- Clamp indices to valid range for small resample counts
+   local lower_idx = math_max(1, math_floor(n_resamples * 0.025))
+   local upper_idx = math_min(n_resamples, math_ceil(n_resamples * 0.975))
+
    return {
       lower = medians[lower_idx],
       upper = medians[upper_idx],
@@ -292,19 +299,22 @@ local function rank(results, key)
    local min_value = sorted[1].value
    local prev_value = min_value
    local current_rank = 1
+
    for i, entry in ipairs(sorted) do
       local name, value = entry.name, entry.value
+
       if value ~= prev_value then
          current_rank = i
          prev_value = value
       end
-      results[name].rank = current_rank
-      if current_rank == 1 or min_value == 0 then
-         results[name].ratio = 1
-      else
-         results[name].ratio = value / min_value
-      end
+
+      local result = results[name]
+      result.rank = current_rank
+
+      local can_compute_ratio = current_rank > 1 and min_value > 0
+      result.ratio = can_compute_ratio and (value / min_value) or 1
    end
+
    return results
 end
 
@@ -421,7 +431,7 @@ end
 ---@param width integer
 ---@return string
 local function center(str, width)
-   local total_padding = math.max(0, width - display_width(str))
+   local total_padding = math_max(0, width - display_width(str))
    local left_padding = math_floor(total_padding / 2)
    local right_padding = total_padding - left_padding
    return string.rep(" ", left_padding) .. str .. string.rep(" ", right_padding)
@@ -471,18 +481,19 @@ local function stats_tostring(stats, unit)
    return humanize(stats.median, unit) .. " ± " .. humanize(stats.ci_margin, unit)
 end
 
+--- Format stats into display strings for table rendering.
 ---@param stats luamark.Stats|luamark.Result
 ---@return table<string, string>
 local function format_row(stats)
    local unit = stats.unit
+
+   -- Format rank with approximate marker if CIs overlap
    local rank_str = ""
    if stats.rank then
-      if stats.is_approximate then
-         rank_str = "≈" .. stats.rank
-      else
-         rank_str = tostring(stats.rank)
-      end
+      local prefix = stats.is_approximate and "≈" or ""
+      rank_str = prefix .. stats.rank
    end
+
    return {
       rank = rank_str,
       ratio = stats.ratio and string.format("%.2f", stats.ratio) or "",
@@ -494,17 +505,17 @@ local function format_row(stats)
    }
 end
 
----Calculate column widths based on header and row content.
+---Calculate column widths based on header labels and row content.
 ---@param rows table[]
 ---@return integer[]
 local function calculate_column_widths(rows)
    local widths = {}
-   for i = 1, #SUMMARIZE_HEADERS do
-      local header = SUMMARIZE_HEADERS[i]
-      widths[i] = display_width(header)
-      for j = 1, #rows do
-         widths[i] = math.max(widths[i], display_width(rows[j][header] or ""))
+   for col, header in ipairs(SUMMARIZE_HEADERS) do
+      local max_width = display_width(HEADER_LABELS[header])
+      for row = 1, #rows do
+         max_width = math_max(max_width, display_width(rows[row][header] or ""))
       end
+      widths[col] = max_width
    end
    return widths
 end
@@ -520,7 +531,7 @@ local function fit_names(rows, widths, max_width)
       other_width = other_width + widths[i]
    end
    local bar_col_width = EMBEDDED_BAR_WIDTH + 2
-   local max_name = math.max(
+   local max_name = math_max(
       NAME_MIN_WIDTH,
       max_width - other_width - (#SUMMARIZE_HEADERS - 1) * 2 - bar_col_width
    )
@@ -558,22 +569,22 @@ local function render_bar_chart(rows, max_width)
    for i = 1, #rows do
       local row = rows[i]
       local ratio = tonumber(row.ratio) or 1
-      max_ratio = math.max(max_ratio, ratio)
+      max_ratio = math_max(max_ratio, ratio)
       -- Suffix format: " Nx (median)" -> space + "x" + " (" + ")" = 5 fixed chars
-      max_suffix_len = math.max(max_suffix_len, 5 + #row.ratio + #row.median)
-      max_name_len = math.max(max_name_len, #row.name)
+      max_suffix_len = math_max(max_suffix_len, 5 + #row.ratio + #row.median)
+      max_name_len = math_max(max_name_len, #row.name)
    end
 
    -- Calculate column widths
    local available = max_width - 3 - max_suffix_len
-   local bar_max = math.max(BAR_MIN_WIDTH, math.min(BAR_MAX_WIDTH, available - NAME_MIN_WIDTH))
-   local name_max = math.max(NAME_MIN_WIDTH, math.min(max_name_len, available - bar_max))
+   local bar_max = math_max(BAR_MIN_WIDTH, math_min(BAR_MAX_WIDTH, available - NAME_MIN_WIDTH))
+   local name_max = math_max(NAME_MIN_WIDTH, math_min(max_name_len, available - bar_max))
 
    local lines = {}
    for i = 1, #rows do
       local row = rows[i]
       local ratio = tonumber(row.ratio) or 1
-      local bar_width = math.max(1, math_floor((ratio / max_ratio) * bar_max))
+      local bar_width = math_max(1, math_floor((ratio / max_ratio) * bar_max))
       local name = pad(truncate_name(row.name, name_max), name_max)
       local bar = string.rep(BAR_CHAR, bar_width)
       lines[i] = string.format("%s  |%s %sx (%s)", name, bar, row.ratio, row.median)
@@ -589,8 +600,8 @@ local function render_plain_table(rows, widths)
    local max_ratio = 1
    local max_ratio_width = 0
    for i = 1, #rows do
-      max_ratio = math.max(max_ratio, tonumber(rows[i].ratio) or 1)
-      max_ratio_width = math.max(max_ratio_width, #rows[i].ratio)
+      max_ratio = math_max(max_ratio, tonumber(rows[i].ratio) or 1)
+      max_ratio_width = math_max(max_ratio_width, #rows[i].ratio)
    end
    local ratio_bar_width = EMBEDDED_BAR_WIDTH + max_ratio_width + 2
 
@@ -610,7 +621,7 @@ local function render_plain_table(rows, widths)
       for i, header in ipairs(SUMMARIZE_HEADERS) do
          if header == "ratio" then
             local ratio = tonumber(row.ratio) or 1
-            local bar_width = math.max(1, math_floor((ratio / max_ratio) * EMBEDDED_BAR_WIDTH))
+            local bar_width = math_max(1, math_floor((ratio / max_ratio) * EMBEDDED_BAR_WIDTH))
             cells[#cells + 1] =
                pad(build_ratio_bar(row.ratio, bar_width, max_ratio_width), ratio_bar_width)
          else
@@ -782,6 +793,7 @@ end
 
 local MAX_PARAM_COMBINATIONS = 10000
 
+--- Generate cartesian product of all parameter values.
 ---@param params table<string, any[]>?
 ---@return table[] # Array of param combinations
 local function expand_params(params)
@@ -789,6 +801,7 @@ local function expand_params(params)
       return { {} }
    end
 
+   -- Check for combinatorial explosion before allocating
    local total_combinations = 1
    for _, values in pairs(params) do
       total_combinations = total_combinations * #values
@@ -802,6 +815,7 @@ local function expand_params(params)
       end
    end
 
+   -- Build combinations iteratively: for each parameter, expand existing combinations
    local combos = { {} }
    local keys = sorted_keys(params)
 
@@ -838,9 +852,9 @@ local function math_round(num, precision)
    if num > 0 then
       rounded = math_floor(num * mul + ROUNDING_EPSILON) / mul
    else
-      rounded = math.ceil(num * mul - ROUNDING_EPSILON) / mul
+      rounded = math_ceil(num * mul - ROUNDING_EPSILON) / mul
    end
-   return math.max(rounded, 10 ^ -precision)
+   return math_max(rounded, 10 ^ -precision)
 end
 
 ---@alias Measure fun(fn: function, iterations: integer, setup?: function, teardown?: function, get_ctx?: function, params?: table): number, number
@@ -913,7 +927,7 @@ local function calibrate_iterations(fn, setup, teardown, get_ctx, params)
       end
 
       local scale = total_time > 0 and (min_time / total_time) or ZERO_TIME_SCALE
-      iterations = math.ceil(iterations * scale)
+      iterations = math_ceil(iterations * scale)
 
       if iterations >= MAX_ITERATIONS then
          return MAX_ITERATIONS
@@ -931,8 +945,8 @@ end
 local function calibrate_stop(round_duration)
    -- Guard against division by zero for extremely fast functions on low-precision clocks.
    local safe_duration = (round_duration > 0) and round_duration or get_min_clocktime()
-   local time = math.max(config.rounds * safe_duration, config.time)
-   local rounds = math.min(MAX_ROUNDS, math.ceil(time / safe_duration))
+   local time = math_max(config.rounds * safe_duration, config.time)
+   local rounds = math_min(MAX_ROUNDS, math_ceil(time / safe_duration))
    return rounds, time
 end
 
@@ -947,14 +961,10 @@ local function validate_benchmark_args(fn, rounds, time, setup, teardown, before
    assert(type(fn) == "function", "'fn' must be a function, got " .. type(fn))
    assert(rounds == nil or rounds > 0, "'rounds' must be > 0.")
    assert(not time or time > 0, "'time' must be > 0.")
-
-   local function_args = { setup = setup, teardown = teardown, before = before, after = after }
-   for name, value in pairs(function_args) do
-      assert(
-         value == nil or type(value) == "function",
-         string.format("'%s' must be a function", name)
-      )
-   end
+   assert(setup == nil or type(setup) == "function", "'setup' must be a function")
+   assert(teardown == nil or type(teardown) == "function", "'teardown' must be a function")
+   assert(before == nil or type(before) == "function", "'before' must be a function")
+   assert(after == nil or type(after) == "function", "'after' must be a function")
 end
 
 local COMMON_OPTS = {
@@ -1164,16 +1174,17 @@ local function single_benchmark(
       ctx = invoke(setup, NIL_CTX)
    end
 
+   -- Using a closure avoids creating a new function per iteration.
    local iteration_ctx = ctx
-
-   -- Indirection avoids creating a new closure per iteration when ctx changes.
    local function get_ctx()
       return iteration_ctx
    end
 
-   -- Per-iteration setup: runs global_before then spec_before
-   local iteration_setup = (global_before or spec_before)
-      and function()
+   -- Per-iteration setup: runs global_before then spec_before.
+   -- Each hook can return a new context; otherwise the previous context is preserved.
+   local iteration_setup
+   if global_before or spec_before then
+      iteration_setup = function()
          iteration_ctx = ctx
          if global_before then
             iteration_ctx = invoke(global_before, ctx) or ctx
@@ -1182,10 +1193,12 @@ local function single_benchmark(
             iteration_ctx = invoke(spec_before, iteration_ctx) or iteration_ctx
          end
       end
+   end
 
-   -- Per-iteration teardown: runs spec_after then global_after
-   local iteration_teardown = (spec_after or global_after)
-      and function()
+   -- Per-iteration teardown: runs spec_after then global_after.
+   local iteration_teardown
+   if spec_after or global_after then
+      iteration_teardown = function()
          if spec_after then
             invoke(spec_after, iteration_ctx)
          end
@@ -1193,6 +1206,7 @@ local function single_benchmark(
             invoke(global_after, iteration_ctx)
          end
       end
+   end
 
    -- Calibration serves as warmup: by the time this completes,
    -- the function has been called many times (JIT compiled, caches hot).
