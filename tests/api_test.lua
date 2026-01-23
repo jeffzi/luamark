@@ -98,7 +98,7 @@ describe("suite API (compare_time/compare_memory)", function()
       luamark = h.load_luamark()
    end)
 
-   test("params are passed to function and returned in results", function()
+   test("params are passed to function and inlined in results", function()
       local seen_n = {}
       local results = luamark.compare_time({
          test = function(ctx, p)
@@ -112,12 +112,16 @@ describe("suite API (compare_time/compare_memory)", function()
       assert.is_true(seen_n[10])
       assert.is_true(seen_n[20])
       assert.are_equal(2, #results)
-      assert.is_not_nil(results[1].stats.median)
+      assert.is_not_nil(results[1].median)
+      -- Params are inlined directly on the result
+      assert.is_true(results[1].n == 10 or results[1].n == 20)
    end)
 
-   test("no params returns empty params table", function()
+   test("no params means no extra fields on result", function()
       local results = luamark.compare_time({ test = h.noop }, { rounds = 1 })
-      assert.same({}, results[1].params)
+      -- Result should have stats fields but no param fields
+      assert.is_not_nil(results[1].median)
+      assert.is_nil(results[1].n) -- no param 'n' was defined
    end)
 
    test("multiple params expand as cartesian product", function()

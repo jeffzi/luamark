@@ -149,7 +149,7 @@ describe("rank_results", function()
       rank_results = h.load_luamark()._internal.rank_results
    end)
 
-   --- Create mock benchmark row with specific CI.
+   --- Create mock benchmark row with specific CI (flat structure).
    ---@param name string
    ---@param median number
    ---@param ci_lower number
@@ -158,8 +158,9 @@ describe("rank_results", function()
    local function make_row(name, median, ci_lower, ci_upper)
       return {
          name = name,
-         params = {},
-         stats = { median = median, ci_lower = ci_lower, ci_upper = ci_upper },
+         median = median,
+         ci_lower = ci_lower,
+         ci_upper = ci_upper,
       }
    end
 
@@ -168,12 +169,12 @@ describe("rank_results", function()
    ---@return string[]
    local function get_rank_strings(results)
       table.sort(results, function(a, b)
-         return a.stats.median < b.stats.median
+         return a.median < b.median
       end)
       local ranks = {}
       for i = 1, #results do
-         local s = results[i].stats
-         ranks[i] = s.is_approximate and ("≈" .. s.rank) or tostring(s.rank)
+         local r = results[i]
+         ranks[i] = r.is_approximate and ("≈" .. r.rank) or tostring(r.rank)
       end
       return ranks
    end
@@ -243,26 +244,26 @@ describe("rank_results", function()
          for i, row in ipairs(case.rows) do
             results[i] = make_row(row[1], row[2], row[3], row[4])
          end
-         rank_results(results)
+         rank_results(results, {}) -- empty param_names for no params
          assert.are_same(case.expected, get_rank_strings(results))
       end)
    end
 
    test("single result: no approximation", function()
       local results = { make_row("a", 5, 4, 6) }
-      rank_results(results)
-      assert.are_equal(1, results[1].stats.rank)
-      assert.is_false(results[1].stats.is_approximate)
+      rank_results(results, {})
+      assert.are_equal(1, results[1].rank)
+      assert.is_false(results[1].is_approximate)
    end)
 
    test("ratio calculated from position ordering", function()
       local results = { make_row("a", 10, 9, 11), make_row("b", 30, 29, 31) }
-      rank_results(results)
+      rank_results(results, {})
       table.sort(results, function(x, y)
-         return x.stats.median < y.stats.median
+         return x.median < y.median
       end)
-      assert.are_equal(1, results[1].stats.ratio)
-      assert.are_equal(3, results[2].stats.ratio)
+      assert.are_equal(1, results[1].ratio)
+      assert.are_equal(3, results[2].ratio)
    end)
 end)
 

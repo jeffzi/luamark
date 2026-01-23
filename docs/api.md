@@ -29,8 +29,8 @@ luamark provides two APIs:
 | -------- | ----- | ------- | -------- |
 | [`timeit`](#timeit) | function | [`Stats`](#stats) | No |
 | [`memit`](#memit) | function | [`Stats`](#stats) | No |
-| [`compare_time`](#compare_time) | table | [`BenchmarkRow[]`](#benchmarkrow) | Yes |
-| [`compare_memory`](#compare_memory) | table | [`BenchmarkRow[]`](#benchmarkrow) | Yes |
+| [`compare_time`](#compare_time) | table | [`Result[]`](#result) | Yes |
+| [`compare_memory`](#compare_memory) | table | [`Result[]`](#result) | Yes |
 
 ---
 
@@ -69,7 +69,7 @@ local stats = luamark.memit(function()
    for i = 1, 1000 do t[i] = i end
 end, { rounds = 10 })
 
-print(stats)  -- "18.82kB ± 0B"
+print(stats)  -- "16.05kB ± 0B"
 ```
 
 ### Options
@@ -101,7 +101,7 @@ multiple functions, optionally with parameterized benchmarks.
 function luamark.compare_time(
    funcs: table<string, fun(ctx, p)|Spec>,
    opts?: SuiteOptions
-) -> BenchmarkRow[]
+) -> Result[]
 ```
 
 Compare multiple functions for execution time. Returns ranked results.
@@ -132,7 +132,7 @@ print(results)  -- Prints formatted comparison table
 function luamark.compare_memory(
    funcs: table<string, fun(ctx, p)|Spec>,
    opts?: SuiteOptions
-) -> BenchmarkRow[]
+) -> Result[]
 ```
 
 Compare multiple functions for memory usage. Returns ranked results.
@@ -207,24 +207,47 @@ Unlike [`SuiteOptions`](#suiteoptions).setup/teardown (run once per benchmark),
 ---@field after? fun(ctx: any, p: table) Per-iteration teardown.
 ```
 
-### BenchmarkRow
+### Result
 
 [`compare_time`](#compare_time) and [`compare_memory`](#compare_memory) return
-[`BenchmarkRow[]`](#benchmarkrow) - a flat array of benchmark results.
+[`Result[]`](#result) - a flat array of benchmark results.
 The array has a `__tostring` metamethod that calls
-[`summarize(results, "compact")`](#summarize):
+[`render(results, true)`](#render):
 
 ```lua
 local results = luamark.compare_time({ a = fn_a, b = fn_b })
-print(results)  -- Prints formatted summary table
+print(results)  -- Prints bar chart (short format)
 ```
 
+Results have a flat structure with stats and params merged directly:
+
 ```lua
----@class BenchmarkRow
----@field name string Benchmark name.
----@field params table<string, string|number|boolean> Parameter values for this run.
----@field stats Stats Benchmark statistics.
+-- Accessing result fields directly (flat structure)
+local result = results[1]
+print(result.name)     -- "a"
+print(result.median)   -- number (stats field)
+print(result.n)        -- 100 (param field, if params = {n = {100}} was used)
 ```
+
+| Field          | Type      | Description                                              |
+| -------------- | --------- | -------------------------------------------------------- |
+| name           | string    | Benchmark name                                           |
+| count          | integer   | Number of samples collected                              |
+| median         | number    | Median value of samples                                  |
+| ci_lower       | number    | Lower bound of 95% CI for median                         |
+| ci_upper       | number    | Upper bound of 95% CI for median                         |
+| ci_margin      | number    | Half-width of CI ((upper - lower) / 2)                   |
+| total          | number    | Sum of all samples                                       |
+| samples        | number[]  | Raw samples (sorted)                                     |
+| rounds         | integer   | Number of benchmark rounds executed                      |
+| iterations     | integer   | Number of iterations per round                           |
+| timestamp      | string    | ISO 8601 UTC timestamp of benchmark start                |
+| unit           | "s"\|"kb" | Measurement unit (seconds or kilobytes)                  |
+| ops            | number?   | Operations per second (1/median, time benchmarks only)   |
+| rank           | integer?  | Rank accounting for CI overlap                           |
+| ratio          | number?   | Ratio to fastest                                         |
+| is_approximate | boolean?  | True if rank is tied due to CI overlap                   |
+| *param_name*   | any       | Any param values are inlined directly (e.g., `result.n`) |
 
 ---
 
@@ -328,31 +351,34 @@ The gap in rank numbers (1 to 3) indicates skipped positions.
 
 ## Utility Functions
 
-### summarize
+### render
 
 ```lua
-function luamark.summarize(
-   results: BenchmarkRow[],
-   format?: "plain"|"compact"|"markdown"|"csv",
+function luamark.render(
+   results: Result[],
+   short?: boolean,
    max_width?: integer
 ) -> string
 ```
 
-Return a string summarizing benchmark results.
+Render benchmark results as a formatted string.
 
-@_param_ `results` — Benchmark results ([`BenchmarkRow`](#benchmarkrow) array from [`compare_time`](#compare_time)/[`compare_memory`](#compare_memory)).
+@*param* `results` — Benchmark results ([`Result`](#result) array from [`compare_time`](#compare_time)/[`compare_memory`](#compare_memory)).
 
-@_param_ `format` — Output format.
+@*param* `short` — Output format.
+
+- `false` or `nil` (default): Full table with embedded bar chart in ratio column
+- `true`: Bar chart only (compact)
+
+@*param* `max_width` — Maximum output width (default: terminal width).
 
 ```lua
-format:
-    | "plain"    -- Table with embedded bar chart in ratio column (default)
-    | "compact"  -- Bar chart only
-    | "markdown" -- Markdown table (no bar chart)
-    | "csv"      -- CSV format
-```
+-- Full table (default)
+print(luamark.render(results))
 
-@_param_ `max_width` — Maximum output width (default: terminal width).
+-- Bar chart only
+print(luamark.render(results, true))
+```
 
 ### humanize_time
 
@@ -362,9 +388,9 @@ function luamark.humanize_time(s: number) -> string
 
 Format a time value to a human-readable string. Selects the best unit automatically (m, s, ms, us, ns).
 
-@_param_ `s` — Time in seconds.
+@*param* `s` — Time in seconds.
 
-@_return_ — Formatted time string (e.g., "42ns", "1.5ms").
+@*return* — Formatted time string (e.g., "42ns", "1.5ms").
 
 ### humanize_memory
 
@@ -375,9 +401,9 @@ function luamark.humanize_memory(kb: number) -> string
 Format a memory value to a human-readable string.
 Selects the best unit automatically (TB, GB, MB, kB, B).
 
-@_param_ `kb` — Memory in kilobytes.
+@*param* `kb` — Memory in kilobytes.
 
-@_return_ — Formatted memory string (e.g., "512kB", "1.5MB").
+@*return* — Formatted memory string (e.g., "512kB", "1.5MB").
 
 ### unload
 
@@ -388,9 +414,9 @@ function luamark.unload(pattern: string) -> integer
 Unload modules matching a Lua pattern from `package.loaded`.
 Useful for benchmarking module load times or resetting state between runs.
 
-@_param_ `pattern` — Lua pattern to match module names against.
+@*param* `pattern` — Lua pattern to match module names against.
 
-@_return_ — Number of modules unloaded.
+@*return* — Number of modules unloaded.
 
 ```lua
 -- Unload all modules starting with "mylib"

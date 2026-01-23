@@ -97,7 +97,7 @@ for _, clock_name in ipairs(h.CLOCKS) do
                local names = {}
                for i = 1, #results do
                   names[results[i].name] = true
-                  assert_stats_valid(results[i].stats)
+                  assert_stats_valid(results[i])
                end
                assert.is_true(names.a)
                assert.is_true(names.b)
@@ -203,7 +203,7 @@ for _, clock_name in ipairs(h.CLOCKS) do
                for i = 1, #results do
                   local row = results[i]
                   local _, single_call_memory = luamark._internal.measure_memory(funcs[row.name], 1)
-                  assert.is_near(single_call_memory, row.stats.median, MEMORY_TOL)
+                  assert.is_near(single_call_memory, row.median, MEMORY_TOL)
                end
             end)
          end)

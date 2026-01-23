@@ -35,10 +35,10 @@ local results1 = luamark.compare_time({
    end,
 })
 
--- Results can be displayed via string conversion (uses luamark.summarize(..., "compact"))
+-- Results can be displayed via string conversion (uses luamark.render(..., true))
 -- random_work_a and random_work_b will show ≈ ranks since their CIs overlap
 print(results1)
-print(luamark.summarize(results1, "plain"))
+print(luamark.render(results1))
 
 -- ============================================================================
 -- Example 2: compare_memory
@@ -92,7 +92,7 @@ local results3 = luamark.compare_time({
       return { data = data } -- returned value becomes ctx in benchmark functions
    end,
 })
-print(luamark.summarize(results3, "plain"))
+print(luamark.render(results3))
 
 -- ============================================================================
 -- Example 4: Two-level setup (per-function before)
@@ -129,7 +129,7 @@ local results4 = luamark.compare_time({
    end,
    rounds = 50,
 })
-print(luamark.summarize(results4, "compact"))
+print(luamark.render(results4, true))
 
 -- ============================================================================
 -- Example 5: Realistic algorithm comparison
@@ -190,18 +190,4 @@ local results5 = luamark.compare_time({
    end,
    rounds = 100,
 })
-print(luamark.summarize(results5, "plain"))
-
--- ============================================================================
--- Example 6: Output formats
--- ============================================================================
-
-print("\n=== Output formats ===")
-print("Plain:")
-print(luamark.summarize(results3, "plain"))
-
-print("\nMarkdown:")
-print(luamark.summarize(results3, "markdown"))
-
-print("\nCSV:")
-print(luamark.summarize(results3, "csv"))
+print(luamark.render(results5))

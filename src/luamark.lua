@@ -110,10 +110,10 @@ local function warn_low_precision_clock()
 end
 
 ---@alias MeasureOnce fun(fn: function, ctx: any, params: table):number
----@alias Target fun()|{[string]: fun()|Spec} A function or table of named functions/Specs to benchmark.
+---@alias Target fun()|{[string]: fun()|luamark.Spec} A function or table of named functions/Specs to benchmark.
 ---@alias ParamValue string|number|boolean Allowed parameter value types.
 
----@class Options Benchmark configuration for timeit/memit.
+---@class luamark.Options Benchmark configuration for timeit/memit.
 ---@field rounds? integer Target number of benchmark rounds.
 ---@field time? number Target duration in seconds.
 ---@field setup? fun(): any Function executed once before benchmark; returns context.
@@ -121,7 +121,7 @@ end
 ---@field before? fun(ctx?: any): any Function executed before each iteration.
 ---@field after? fun(ctx?: any) Function executed after each iteration.
 
----@class SuiteOptions : Options Configuration for compare_time/compare_memory.
+---@class luamark.SuiteOptions : luamark.Options Configuration for compare_time/compare_memory.
 ---@field setup? fun(p: table): any Function executed once before benchmark; receives params, returns context.
 ---@field teardown? fun(ctx: any, p: table) Function executed once after benchmark.
 ---@field before? fun(ctx: any, p: table): any Function executed before each iteration.
@@ -201,16 +201,6 @@ local function shallow_copy(tbl)
       copy[key] = value
    end
    return copy
-end
-
----@param value any
----@return string
-local function escape_csv(value)
-   value = tostring(value)
-   if value:find('[,"]') then
-      return '"' .. value:gsub('"', '""') .. '"'
-   end
-   return value
 end
 
 local MAX_PARAM_COMBINATIONS = 10000
@@ -335,7 +325,7 @@ local function bootstrap_ci(samples, n_resamples)
    }
 end
 
----@class BaseStats
+---@class luamark.BaseStats
 ---@field count integer Number of samples collected.
 ---@field median number Median value of samples.
 ---@field ci_lower number Lower bound of 95% confidence interval for median.
@@ -343,8 +333,10 @@ end
 ---@field ci_margin number Half-width of confidence interval ((upper - lower) / 2).
 ---@field total number Sum of all samples.
 ---@field samples number[] Raw samples (sorted).
+---@field ratio? number Ratio relative to fastest benchmark (added by rank()).
+---@field rank? integer Rank (added by rank()).
 
----@class Stats : BaseStats
+---@class luamark.Stats : luamark.BaseStats
 ---@field rounds integer Number of benchmark rounds executed.
 ---@field iterations integer Number of iterations per round.
 ---@field timestamp string ISO 8601 UTC timestamp of benchmark start.
@@ -355,7 +347,7 @@ end
 ---@field is_approximate? boolean True if rank is approximate due to overlapping CIs.
 
 ---@param samples number[]
----@return BaseStats
+---@return luamark.BaseStats
 local function calculate_stats(samples)
    local count = #samples
 
@@ -393,9 +385,9 @@ end
 
 --- Rank benchmark results by specified key, adding 'rank' and 'ratio' fields.
 --- Smallest value gets rank 1 and ratio 1.0; other ratios are relative to it.
----@param results {[string]: Stats} Benchmark results indexed by name.
+---@param results {[string]: luamark.Stats|luamark.Result} Benchmark results indexed by name.
 ---@param key string Stats field to rank by.
----@return {[string]: Stats}
+---@return {[string]: luamark.Stats|luamark.Result}
 local function rank(results, key)
    assert(results and next(results), "'results' is nil or empty.")
 
@@ -493,7 +485,7 @@ local function stats_tostring(stats, unit)
    return humanize(stats.median, unit) .. " ± " .. humanize(stats.ci_margin, unit)
 end
 
----@param stats Stats
+---@param stats luamark.Stats|luamark.Result
 ---@return table<string, string>
 local function format_row(stats)
    local unit = stats.unit
@@ -511,36 +503,47 @@ local function format_row(stats)
       median = humanize(stats.median, unit),
       ci_low = humanize(stats.ci_lower, unit),
       ci_high = humanize(stats.ci_upper, unit),
-      ops = stats.ops and (trim_zeroes(string.format("%.2f", stats.ops)) .. "/s") or "",
+      ops = stats.ops and (humanize(stats.ops, "count") .. "/s") or "",
       iters = stats.rounds .. " × " .. humanize(stats.iterations, "count"),
    }
+end
+
+--- Count display width (UTF-8 aware). Counts characters, not bytes.
+---@param str string
+---@return integer
+local function display_width(str)
+   -- Count bytes that are NOT UTF-8 continuation bytes (0x80-0xBF)
+   local width = 0
+   for i = 1, #str do
+      local byte = string.byte(str, i)
+      if byte < 0x80 or byte >= 0xC0 then
+         width = width + 1
+      end
+   end
+   return width
 end
 
 ---@param str string
 ---@param width integer
 ---@return string
 local function pad(str, width)
-   return str .. string.rep(" ", width - #str)
+   return str .. string.rep(" ", width - display_width(str))
 end
 
 ---@param str string
 ---@param width integer
 ---@return string
 local function center(str, width)
-   local total_padding = math.max(0, width - #str)
+   local total_padding = math.max(0, width - display_width(str))
    local left_padding = math_floor(total_padding / 2)
    local right_padding = total_padding - left_padding
    return string.rep(" ", left_padding) .. str .. string.rep(" ", right_padding)
 end
 
 ---@param t string[]
----@param format? "plain"|"compact"|"markdown"
 ---@return string
-local function concat_line(t, format)
-   if format == "plain" then
-      return table.concat(t, "  ")
-   end
-   return "| " .. table.concat(t, " | ") .. " |"
+local function concat_line(t)
+   return table.concat(t, "  ")
 end
 
 local BAR_CHAR = "█"
@@ -628,9 +631,9 @@ local function calculate_column_widths(rows)
    local widths = {}
    for i = 1, #SUMMARIZE_HEADERS do
       local header = SUMMARIZE_HEADERS[i]
-      widths[i] = #header
+      widths[i] = display_width(header)
       for j = 1, #rows do
-         widths[i] = math.max(widths[i], #(rows[j][header] or ""))
+         widths[i] = math.max(widths[i], display_width(rows[j][header] or ""))
       end
    end
    return widths
@@ -693,7 +696,7 @@ local function render_plain_table(rows, widths)
       underline_cells[#underline_cells + 1] = string.rep("-", width)
    end
 
-   local lines = { concat_line(header_cells, "plain"), concat_line(underline_cells, "plain") }
+   local lines = { concat_line(header_cells), concat_line(underline_cells) }
 
    for r = 1, #rows do
       local row = rows[r]
@@ -708,33 +711,7 @@ local function render_plain_table(rows, widths)
             cells[#cells + 1] = pad(row[header], widths[i])
          end
       end
-      lines[#lines + 1] = concat_line(cells, "plain")
-   end
-
-   return table.concat(lines, "\n")
-end
-
----Render markdown table.
----@param rows table[]
----@param widths integer[]
----@return string
-local function render_markdown_table(rows, widths)
-   local header_cells, underline_cells = {}, {}
-   for i, header in ipairs(SUMMARIZE_HEADERS) do
-      local label = HEADER_LABELS[header]
-      header_cells[#header_cells + 1] = center(label, widths[i])
-      underline_cells[#underline_cells + 1] = string.rep("-", widths[i])
-   end
-
-   local lines = { concat_line(header_cells, "markdown"), concat_line(underline_cells, "markdown") }
-
-   for r = 1, #rows do
-      local row = rows[r]
-      local cells = {}
-      for i, header in ipairs(SUMMARIZE_HEADERS) do
-         cells[#cells + 1] = pad(row[header], widths[i])
-      end
-      lines[#lines + 1] = concat_line(cells, "markdown")
+      lines[#lines + 1] = concat_line(cells)
    end
 
    return table.concat(lines, "\n")
@@ -744,120 +721,112 @@ end
 -- Parameterized result helpers
 -- ----------------------------------------------------------------------------
 
----Format parameter values as a readable string.
----@param params table Parameter name to value mapping
+---@class luamark.Result : luamark.BaseStats
+---@field name string Benchmark name.
+---@field rounds integer Number of benchmark rounds executed.
+---@field iterations integer Number of iterations per round.
+---@field timestamp string ISO 8601 UTC timestamp of benchmark start.
+---@field unit "s"|"kb" Measurement unit (seconds or kilobytes).
+---@field ops? number Operations per second (1/median). Only present for time benchmarks.
+---@field ratio? number Ratio relative to fastest benchmark.
+---@field rank? integer Rank accounting for CI overlap (tied results share the same rank).
+---@field is_approximate? boolean True if rank is approximate due to overlapping CIs.
+-- Plus any param keys inlined directly on the result (e.g., result.n, result.size)
+
+-- Keys that are part of stats, not user params
+local STAT_KEYS = {
+   name = true,
+   count = true,
+   median = true,
+   ci_lower = true,
+   ci_upper = true,
+   ci_margin = true,
+   total = true,
+   samples = true,
+   rounds = true,
+   iterations = true,
+   timestamp = true,
+   unit = true,
+   ops = true,
+   ratio = true,
+   rank = true,
+   is_approximate = true,
+}
+
+---Collect all unique parameter names from flat result rows.
+---@param rows luamark.Result[]
+---@return string[]
+local function collect_param_names(rows)
+   local seen = {}
+   for i = 1, #rows do
+      for key in pairs(rows[i]) do
+         if not STAT_KEYS[key] then
+            seen[key] = true
+         end
+      end
+   end
+   return sorted_keys(seen)
+end
+
+---Format parameter values as a readable string from flat result.
+---@param row luamark.Result
+---@param param_names string[]
 ---@return string
-local function format_params(params)
-   local keys = sorted_keys(params)
+local function format_params(row, param_names)
    local parts = {}
-   for i = 1, #keys do
-      local name = keys[i]
-      parts[i] = name .. "=" .. tostring(params[name])
+   for i = 1, #param_names do
+      local name = param_names[i]
+      if row[name] ~= nil then
+         parts[#parts + 1] = name .. "=" .. tostring(row[name])
+      end
    end
    return table.concat(parts, ", ")
 end
 
----@class BenchmarkRow
----@field name string Benchmark name ("1" for unnamed single function).
----@field params table<string, ParamValue> Parameter values for this run.
----@field stats Stats Benchmark statistics.
-
 ---Rank benchmark results within each parameter combination.
 ---Uses transitive overlap grouping: results with overlapping CIs share the same rank.
----@param results BenchmarkRow[]
-local function rank_results(results)
+---@param results luamark.Result[]
+---@param param_names string[]
+local function rank_results(results, param_names)
    local groups = {}
    for i = 1, #results do
       local row = results[i]
-      local key = format_params(row.params)
+      local key = format_params(row, param_names)
       groups[key] = groups[key] or {}
       groups[key][#groups[key] + 1] = row
    end
 
    for _, group in pairs(groups) do
       table_sort(group, function(a, b)
-         return a.stats.median < b.stats.median
+         return a.median < b.median
       end)
 
-      local first = group[1].stats
+      local first = group[1]
       local min_median = first.median
       first.ratio = 1
       first.rank = 1
       first.is_approximate = false
 
       for i = 2, #group do
-         local s = group[i].stats
-         local prev = group[i - 1].stats
-         s.ratio = min_median > 0 and (s.median / min_median) or 1
+         local r = group[i]
+         local prev = group[i - 1]
+         r.ratio = min_median > 0 and (r.median / min_median) or 1
 
-         if s.ci_lower <= prev.ci_upper and prev.ci_lower <= s.ci_upper then
-            s.rank = prev.rank
-            s.is_approximate = true
+         if r.ci_lower <= prev.ci_upper and prev.ci_lower <= r.ci_upper then
+            r.rank = prev.rank
+            r.is_approximate = true
             prev.is_approximate = true
          else
-            s.rank = i
-            s.is_approximate = false
+            r.rank = i
+            r.is_approximate = false
          end
       end
    end
 end
 
----Collect all unique parameter names from flattened rows.
----@param rows BenchmarkRow[]
----@return string[]
-local function collect_param_names(rows)
-   local seen = {}
-   for i = 1, #rows do
-      for name in pairs(rows[i].params) do
-         seen[name] = true
-      end
-   end
-   return sorted_keys(seen)
-end
-
----Render results as CSV with param columns for data export.
----@param rows BenchmarkRow[]
----@return string
-local function render_csv(rows)
-   local param_names = collect_param_names(rows)
-
-   local headers = { "name" }
-   for i = 1, #param_names do
-      headers[#headers + 1] = param_names[i]
-   end
-   for i = 2, #SUMMARIZE_HEADERS do
-      headers[i + #param_names] = SUMMARIZE_HEADERS[i]
-   end
-
-   -- Sort rows by name then params for consistent output
-   table_sort(rows, function(a, b)
-      if a.name ~= b.name then
-         return a.name < b.name
-      end
-      return format_params(a.params) < format_params(b.params)
-   end)
-
-   local lines = { table.concat(headers, ",") }
-   for i = 1, #rows do
-      local row = rows[i]
-      local formatted = format_row(row.stats)
-      local cells = { escape_csv(row.name) }
-      for j = 1, #param_names do
-         local val = row.params[param_names[j]]
-         cells[#cells + 1] = escape_csv(val ~= nil and tostring(val) or "")
-      end
-      for j = 2, #SUMMARIZE_HEADERS do
-         cells[#cells + 1] = escape_csv(formatted[SUMMARIZE_HEADERS[j]] or "")
-      end
-      lines[#lines + 1] = table.concat(cells, ",")
-   end
-
-   return table.concat(lines, "\n")
-end
-
----Render summary table (plain/compact/markdown).
----@param results {[string]: Stats}
----@param format "plain"|"compact"|"markdown"
+---Render summary table (plain/compact).
+---@param results {[string]: luamark.Stats|luamark.Result}
+---@param format "plain"|"compact"
 ---@param max_width? integer
 ---@return string
 local function render_summary(results, format, max_width)
@@ -886,13 +855,8 @@ local function render_summary(results, format, max_width)
    end
 
    local widths = calculate_column_widths(rows)
-
-   if format == "plain" then
-      truncate_names_to_fit(rows, widths, max_width)
-      return render_plain_table(rows, widths)
-   end
-
-   return render_markdown_table(rows, widths)
+   truncate_names_to_fit(rows, widths, max_width)
+   return render_plain_table(rows, widths)
 end
 
 -- ----------------------------------------------------------------------------
@@ -1019,9 +983,9 @@ end
 ---@param iterations integer Number of iterations per round.
 ---@param timestamp string ISO 8601 UTC timestamp.
 ---@param unit default_unit Measurement unit.
----@return Stats
+---@return luamark.Stats
 local function build_stats_result(samples, rounds, iterations, timestamp, unit)
-   local stats = calculate_stats(samples) ---@cast stats Stats
+   local stats = calculate_stats(samples) ---@cast stats luamark.Stats
    stats.rounds = rounds
    stats.iterations = iterations
    stats.timestamp = timestamp
@@ -1083,7 +1047,7 @@ end
 ---@param global_before? function Shared per-iteration setup (from Options).
 ---@param global_after? function Shared per-iteration teardown (from Options).
 ---@param single_mode? boolean When true, hooks receive no params argument.
----@return Stats
+---@return luamark.Stats
 local function single_benchmark(
    fn,
    measure,
@@ -1196,13 +1160,13 @@ end
 --- Per-function benchmark specification with optional lifecycle hooks.
 --- Use when comparing functions that need different setup/teardown.
 --- Unlike Options.setup/teardown (run once), Spec hooks run each iteration.
----@class Spec
+---@class luamark.Spec
 ---@field fn fun(ctx: any, p: table) Benchmark function; receives iteration context and params.
 ---@field before? fun(ctx: any, p: table): any Per-iteration setup; returns iteration context.
 ---@field after? fun(ctx: any, p: table) Per-iteration teardown.
 
 --- Parse a benchmark specification into its components.
----@param spec function|Spec Function or Spec table.
+---@param spec function|luamark.Spec Function or Spec table.
 ---@return function fn Benchmark function.
 ---@return function? before Per-iteration setup.
 ---@return function? after Per-iteration teardown.
@@ -1218,12 +1182,12 @@ local function parse_spec(spec)
 end
 
 --- Run benchmarks on a table of functions with optional params.
----@param funcs table<string, function|Spec> Table of named functions or Specs to benchmark.
+---@param funcs table<string, function|luamark.Spec> Table of named functions or Specs to benchmark.
 ---@param measure Measure Measurement function.
 ---@param disable_gc boolean Controls garbage collection during benchmark.
 ---@param unit default_unit Measurement unit.
----@param opts SuiteOptions Benchmark options.
----@return BenchmarkRow[]
+---@param opts luamark.SuiteOptions Benchmark options.
+---@return luamark.Result[]
 local function benchmark_suite(funcs, measure, disable_gc, unit, opts)
    opts = opts or {}
    local params_list = expand_params(opts.params)
@@ -1251,14 +1215,23 @@ local function benchmark_suite(funcs, measure, disable_gc, unit, opts)
             opts.after,
             false -- suite mode: hooks receive params
          )
-         results[#results + 1] = { name = name, params = p, stats = stats }
+         -- Flatten: merge params and stats into single row
+         local row = { name = name }
+         for pk, pv in pairs(p) do
+            row[pk] = pv
+         end
+         for sk, sv in pairs(stats) do
+            row[sk] = sv
+         end
+         results[#results + 1] = row
       end
    end
 
-   rank_results(results)
+   local param_names = collect_param_names(results)
+   rank_results(results, param_names)
    setmetatable(results, {
       __tostring = function(self)
-         return luamark.summarize(self, "compact")
+         return luamark.render(self, true)
       end,
    })
    return results
@@ -1327,7 +1300,7 @@ end
 
 --- Validate options for single API (timeit/memit).
 --- Rejects params option with helpful error message.
----@param opts Options Options to validate.
+---@param opts luamark.Options Options to validate.
 local function validate_single_options(opts)
    ---@diagnostic disable-next-line: undefined-field
    if opts.params then
@@ -1337,7 +1310,7 @@ local function validate_single_options(opts)
 end
 
 --- Validate options for suite API (compare_time/compare_memory).
----@param opts SuiteOptions Options to validate.
+---@param opts luamark.SuiteOptions Options to validate.
 local function validate_suite_options(opts)
    validate_options(opts, SUITE_ONLY_OPTS)
    if opts.params then
@@ -1362,49 +1335,34 @@ end
 -- Public API
 -- ----------------------------------------------------------------------------
 
-local VALID_FORMATS = { plain = true, compact = true, markdown = true, csv = true }
-
---- Return a string summarizing benchmark results.
---- Results are now always BenchmarkRow[] (flat array).
----@param results BenchmarkRow[] Benchmark results to summarize.
----@param format? "plain"|"compact"|"markdown"|"csv" Output format.
+--- Render benchmark results as a formatted string.
+---@param results luamark.Result[] Benchmark results (flat array from compare_time/compare_memory).
+---@param short? boolean If true, show bar chart only; if false/nil, show full table.
 ---@param max_width? integer Maximum output width (default: terminal width).
 ---@return string
-function luamark.summarize(results, format, max_width)
+function luamark.render(results, short, max_width)
    assert(results and #results > 0, "'results' is nil or empty.")
-   format = format or "plain"
-   assert(VALID_FORMATS[format], "format must be 'plain', 'compact', 'markdown', or 'csv'")
 
    max_width = max_width or get_term_width()
+   local format = short and "compact" or "plain"
 
-   local has_params = false
-   for i = 1, #results do
-      if next(results[i].params) then
-         has_params = true
-         break
-      end
-   end
-
-   -- CSV outputs flat data with param columns for export; other formats group by params for display.
-   if format == "csv" then
-      return render_csv(results)
-   end
-   ---@cast format "plain"|"compact"|"markdown"
+   local param_names = collect_param_names(results)
+   local has_params = #param_names > 0
 
    if not has_params then
       local by_name = {}
       for i = 1, #results do
-         by_name[results[i].name] = results[i].stats
+         by_name[results[i].name] = results[i]
       end
       return render_summary(by_name, format, max_width)
    end
 
-   local groups = {} ---@type table<string, {[string]: Stats}>
+   local groups = {} ---@type table<string, {[string]: luamark.Result}>
    for i = 1, #results do
       local row = results[i]
-      local key = format_params(row.params)
+      local key = format_params(row, param_names)
       groups[key] = groups[key] or {}
-      groups[key][row.name] = row.stats
+      groups[key][row.name] = row
    end
 
    local output = {}
@@ -1428,8 +1386,8 @@ end
 --- Benchmark a single function for execution time.
 --- Time is represented in seconds.
 ---@param fn fun(ctx?: any) Function to benchmark; receives context from setup.
----@param opts? Options Benchmark configuration.
----@return Stats Benchmark statistics.
+---@param opts? luamark.Options Benchmark configuration.
+---@return luamark.Stats Benchmark statistics.
 function luamark.timeit(fn, opts)
    assert(type(fn) == "function", "'fn' must be a function, got " .. type(fn))
    opts = opts or {}
@@ -1455,8 +1413,8 @@ end
 --- Benchmark a single function for memory usage.
 --- Memory is represented in kilobytes.
 ---@param fn fun(ctx?: any) Function to benchmark; receives context from setup.
----@param opts? Options Benchmark configuration.
----@return Stats Benchmark statistics.
+---@param opts? luamark.Options Benchmark configuration.
+---@return luamark.Stats Benchmark statistics.
 function luamark.memit(fn, opts)
    assert(type(fn) == "function", "'fn' must be a function, got " .. type(fn))
    opts = opts or {}
@@ -1481,9 +1439,9 @@ end
 
 --- Compare multiple functions for execution time.
 --- Time is represented in seconds.
----@param funcs table<string, function|Spec> Table of named functions or Specs to benchmark.
----@param opts? SuiteOptions Benchmark configuration with optional params.
----@return BenchmarkRow[] Flat array of benchmark results with ranking.
+---@param funcs table<string, function|luamark.Spec> Table of named functions or Specs to benchmark.
+---@param opts? luamark.SuiteOptions Benchmark configuration with optional params.
+---@return luamark.Result[] Flat array of benchmark results with ranking.
 function luamark.compare_time(funcs, opts)
    assert(type(funcs) == "table", "'funcs' must be a table, got " .. type(funcs))
    validate_funcs(funcs)
@@ -1494,9 +1452,9 @@ end
 
 --- Compare multiple functions for memory usage.
 --- Memory is represented in kilobytes.
----@param funcs table<string, function|Spec> Table of named functions or Specs to benchmark.
----@param opts? SuiteOptions Benchmark configuration with optional params.
----@return BenchmarkRow[] Flat array of benchmark results with ranking.
+---@param funcs table<string, function|luamark.Spec> Table of named functions or Specs to benchmark.
+---@param opts? luamark.SuiteOptions Benchmark configuration with optional params.
+---@return luamark.Result[] Flat array of benchmark results with ranking.
 function luamark.compare_memory(funcs, opts)
    assert(type(funcs) == "table", "'funcs' must be a table, got " .. type(funcs))
    validate_funcs(funcs)

@@ -45,15 +45,15 @@ Alternatively, you can manually include [luamark.lua](src/luamark.lua) in your p
 | --------------------- | ------------------ | --------------------- | -------- |
 | [`timeit`][1]         | single function    | [`Stats`][5]          | No       |
 | [`memit`][2]          | single function    | [`Stats`][5]          | No       |
-| [`compare_time`][3]   | table of functions | [`BenchmarkRow[]`][6] | Yes      |
-| [`compare_memory`][4] | table of functions | [`BenchmarkRow[]`][6] | Yes      |
+| [`compare_time`][3]   | table of functions | [`Result[]`][6]       | Yes      |
+| [`compare_memory`][4] | table of functions | [`Result[]`][6]       | Yes      |
 
 [1]: docs/api.md#timeit
 [2]: docs/api.md#memit
 [3]: docs/api.md#compare_time
 [4]: docs/api.md#compare_memory
 [5]: docs/api.md#stats
-[6]: docs/api.md#benchmarkrow
+[6]: docs/api.md#result
 
 ### Single Function
 
@@ -111,23 +111,23 @@ local results = luamark.compare_time({
    end,
 })
 
-print(results)  -- compact output
+print(results)  -- compact output (bar chart)
 
-print(luamark.summarize(results, "plain"))  -- detailed output
+print(luamark.render(results))  -- detailed output (full table)
 ```
 
 ```text
 n=100
-    Name      Rank      Ratio       Median  CI Low  CI High      Ops        Iters
-------------  ----  --------------  ------  ------  -------  -----------  ---------
-table_concat  1     █        1.00x  1.17us  1.12us  1.17us   856898.03/s  1000 × 1
-loop          2     ████████ 4.18x  4.88us  4.83us  4.96us   205128.21/s  1000 × 1
+    Name      Rank      Ratio       Median  CI Low  CI High    Ops      Iters
+------------  ----  --------------  ------  ------  -------  --------  --------
+table_concat  1     █        1.00x  1.12us  1.12us  1.12us   888.9k/s  1000 × 1
+loop          2     ████████ 4.18x  4.71us  4.67us  4.79us   212.4k/s  1000 × 1
 
 n=1000
-    Name      Rank       Ratio        Median    CI Low   CI High      Ops        Iters
-------------  ----  ---------------  --------  --------  --------  ----------  ---------
-table_concat  1     █         1.00x  12.12us   12.04us   12.21us   82474.23/s  1000 × 1
-loop          2     ████████ 14.98x  181.58us  180.83us  182.33us  5507.12/s   1000 × 1
+    Name      Rank       Ratio        Median    CI Low   CI High     Ops     Iters
+------------  ----  ---------------  --------  --------  --------  -------  --------
+table_concat  1     █         1.00x  12.33us   12.29us   12.38us   81.1k/s  1000 × 1
+loop          2     ████████ 15.47x  190.83us  189.46us  192.38us  5.2k/s   1000 × 1
 ```
 
 When results have overlapping confidence intervals, they share the same rank with
