@@ -1479,6 +1479,14 @@ function luamark.humanize_memory(kb)
    return humanize(kb, "kb")
 end
 
+--- Format a count to a human-readable string.
+--- Automatically select the best SI suffix (M, k, or none).
+---@param n number Count value.
+---@return string Formatted count string (e.g., "1k", "12.5M").
+function luamark.humanize_count(n)
+   return humanize(n, "count")
+end
+
 --- Unload modules matching a Lua pattern from package.loaded.
 --- Useful for benchmarking module load times or resetting state.
 ---@param pattern string Lua pattern to match module names against.

@@ -405,6 +405,18 @@ Selects the best unit automatically (TB, GB, MB, kB, B).
 
 @*return* — Formatted memory string (e.g., "512kB", "1.5MB").
 
+### humanize_count
+
+```lua
+function luamark.humanize_count(n: number) -> string
+```
+
+Format a count to a human-readable string with SI suffix (M, k).
+
+@*param* `n` — Count value.
+
+@*return* — Formatted count string (e.g., "1k", "12.5M").
+
 ### unload
 
 ```lua
