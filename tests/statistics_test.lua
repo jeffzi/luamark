@@ -2,54 +2,6 @@
 
 local h = require("tests.helpers")
 
-describe("rank", function()
-   local rank
-
-   setup(function()
-      rank = h.load_luamark()._internal.rank
-   end)
-
-   test("assigns rank and ratio based on values", function()
-      local data = {
-         test1 = { median = 8 },
-         test2 = { median = 20 },
-         test3 = { median = 5 },
-      }
-      rank(data, "median")
-      assert.are_same({ rank = 1, median = 5, ratio = 1 }, data.test3)
-      assert.are_same({ rank = 2, median = 8, ratio = 1.6 }, data.test1)
-      assert.are_same({ rank = 3, median = 20, ratio = 4 }, data.test2)
-   end)
-
-   test("handles zero minimum and identical values", function()
-      local zero_data = {
-         test1 = { median = 0 },
-         test2 = { median = 10 },
-      }
-      rank(zero_data, "median")
-      assert.are_equal(1, zero_data.test1.rank)
-      assert.are_equal(1, zero_data.test1.ratio)
-
-      local same_data = {
-         test1 = { median = 10 },
-         test2 = { median = 10 },
-      }
-      rank(same_data, "median")
-      assert.are_equal(1, same_data.test1.rank)
-      assert.are_equal(1, same_data.test2.rank)
-   end)
-
-   test("rejects nil and empty input", function()
-      assert.has_error(function()
-         rank({}, "foo")
-      end, "'results' is nil or empty.")
-      assert.has_error(function()
-         ---@diagnostic disable-next-line: param-type-mismatch
-         rank(nil, "bar")
-      end, "'results' is nil or empty.")
-   end)
-end)
-
 describe("calculate_stats", function()
    local calculate_stats
 
@@ -57,35 +9,61 @@ describe("calculate_stats", function()
       calculate_stats = h.load_luamark()._internal.calculate_stats
    end)
 
-   test("computes median and CI fields", function()
-      local samples = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 }
-      local stats = calculate_stats(samples)
-      assert.are_equal(10, stats.count)
-      assert.are_equal(5.5, stats.median)
-      assert.is_number(stats.ci_lower)
-      assert.is_number(stats.ci_upper)
-      assert.is_number(stats.ci_margin)
-      assert.is_true(stats.ci_lower <= stats.median)
-      assert.is_true(stats.ci_upper >= stats.median)
-   end)
+   -- For samples < 3, CI collapses to median with margin 0 (deterministic)
+   -- For samples >= 3, CI is computed via bootstrap (stochastic, test bounds only)
+   local cases = {
+      {
+         name = "single sample",
+         samples = { 42 },
+         median = 42,
+         ci_lower = 42,
+         ci_upper = 42,
+         ci_margin = 0,
+      },
+      {
+         name = "two samples",
+         samples = { 5, 10 },
+         median = 7.5,
+         ci_lower = 7.5,
+         ci_upper = 7.5,
+         ci_margin = 0,
+      },
+      {
+         name = "ten samples (bootstrap CI)",
+         samples = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 },
+         median = 5.5,
+         ci_lower_min = 1,
+         ci_upper_max = 10,
+      },
+      {
+         name = "odd sample count",
+         samples = { 1, 2, 3, 4, 5 },
+         median = 3,
+         ci_lower_min = 1,
+         ci_upper_max = 5,
+      },
+   }
 
-   test("handles small samples (fewer than 3)", function()
-      local samples = { 5, 10 }
-      local stats = calculate_stats(samples)
-      assert.are_equal(7.5, stats.median)
-      assert.are_equal(7.5, stats.ci_lower)
-      assert.are_equal(7.5, stats.ci_upper)
-      assert.are_equal(0, stats.ci_margin)
-   end)
+   for _, case in ipairs(cases) do
+      test(case.name, function()
+         local stats = calculate_stats(case.samples)
+         assert.are_equal(case.median, stats.median)
 
-   test("handles single sample", function()
-      local samples = { 42 }
-      local stats = calculate_stats(samples)
-      assert.are_equal(42, stats.median)
-      assert.are_equal(42, stats.ci_lower)
-      assert.are_equal(42, stats.ci_upper)
-      assert.are_equal(0, stats.ci_margin)
-   end)
+         if case.ci_lower then
+            -- Deterministic CI (small samples)
+            assert.are_equal(case.ci_lower, stats.ci_lower)
+            assert.are_equal(case.ci_upper, stats.ci_upper)
+            assert.are_equal(case.ci_margin, stats.ci_margin)
+         else
+            -- Stochastic CI (bootstrap) - test bounds and relationships
+            assert.is_true(stats.ci_lower >= case.ci_lower_min)
+            assert.is_true(stats.ci_upper <= case.ci_upper_max)
+            assert.is_true(stats.ci_lower <= stats.median)
+            assert.is_true(stats.ci_upper >= stats.median)
+            assert.are_equal((stats.ci_upper - stats.ci_lower) / 2, stats.ci_margin)
+         end
+      end)
+   end
 end)
 
 describe("math_median", function()
@@ -95,15 +73,17 @@ describe("math_median", function()
       math_median = h.load_luamark()._internal.math_median
    end)
 
-   test("computes median for odd-length arrays", function()
-      assert.are_equal(3, math_median({ 1, 3, 5 }))
-      assert.are_equal(5, math_median({ 1, 3, 5, 7, 9 }))
-   end)
-
-   test("computes median for even-length arrays", function()
-      assert.are_equal(2.5, math_median({ 1, 2, 3, 4 }))
-      assert.are_equal(3.5, math_median({ 1, 2, 3, 4, 5, 6 }))
-   end)
+   local cases = {
+      { name = "odd-length array", input = { 1, 3, 5 }, expected = 3 },
+      { name = "odd-length array (5 elements)", input = { 1, 3, 5, 7, 9 }, expected = 5 },
+      { name = "even-length array", input = { 1, 2, 3, 4 }, expected = 2.5 },
+      { name = "even-length array (6 elements)", input = { 1, 2, 3, 4, 5, 6 }, expected = 3.5 },
+   }
+   for _, case in ipairs(cases) do
+      test(case.name, function()
+         assert.are_equal(case.expected, math_median(case.input))
+      end)
+   end
 end)
 
 describe("bootstrap_ci", function()
@@ -114,12 +94,12 @@ describe("bootstrap_ci", function()
    end)
 
    test("returns lower and upper bounds", function()
-      math.randomseed(12345)
       local samples = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 }
-      local ci = bootstrap_ci(samples, 1000)
-      assert.is_number(ci.lower)
-      assert.is_number(ci.upper)
-      assert.is_true(ci.lower <= ci.upper)
+      local lower, upper = bootstrap_ci(samples, 1000)
+      -- 95% CI should bracket the true median (5.5) with reasonable margins
+      assert.is_true(lower >= 1 and lower <= 5.5)
+      assert.is_true(upper >= 5.5 and upper <= 10)
+      assert.is_true(lower < upper)
    end)
 
    test("CI width decreases with more samples", function()
@@ -133,11 +113,11 @@ describe("bootstrap_ci", function()
          large_samples[i] = (i % 10) + 1
       end
 
-      local ci_small = bootstrap_ci(small_samples, 1000)
-      local ci_large = bootstrap_ci(large_samples, 1000)
+      local small_lower, small_upper = bootstrap_ci(small_samples, 1000)
+      local large_lower, large_upper = bootstrap_ci(large_samples, 1000)
 
-      local width_small = ci_small.upper - ci_small.lower
-      local width_large = ci_large.upper - ci_large.lower
+      local width_small = small_upper - small_lower
+      local width_large = large_upper - large_lower
       assert.is_true(width_large <= width_small)
    end)
 end)
@@ -179,7 +159,6 @@ describe("rank_results", function()
       return ranks
    end
 
-   -- Data-driven tests for CI overlap scenarios
    local overlap_cases = {
       {
          name = "no overlap: all distinct ranks",
@@ -274,17 +253,19 @@ describe("humanize with count unit", function()
       humanize = h.load_luamark()._internal.humanize
    end)
 
-   test("formats counts with SI suffixes", function()
-      assert.are_equal("1", humanize(1, "count"))
-      assert.are_equal("500", humanize(500, "count"))
-      assert.are_equal("1k", humanize(1000, "count"))
-      assert.are_equal("1.5k", humanize(1500, "count"))
-      assert.are_equal("10k", humanize(10000, "count"))
-      assert.are_equal("1M", humanize(1000000, "count"))
-      assert.are_equal("2.5M", humanize(2500000, "count"))
-   end)
-
-   test("handles zero", function()
-      assert.are_equal("0", humanize(0, "count"))
-   end)
+   local cases = {
+      { input = 0, expected = "0" },
+      { input = 1, expected = "1" },
+      { input = 500, expected = "500" },
+      { input = 1000, expected = "1k" },
+      { input = 1500, expected = "1.5k" },
+      { input = 10000, expected = "10k" },
+      { input = 1000000, expected = "1M" },
+      { input = 2500000, expected = "2.5M" },
+   }
+   for _, case in ipairs(cases) do
+      test("humanize(" .. case.input .. ") = " .. case.expected, function()
+         assert.are_equal(case.expected, humanize(case.input, "count"))
+      end)
+   end
 end)

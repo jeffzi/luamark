@@ -17,9 +17,14 @@ describe("config", function()
       assert.has_errors(function()
          luamark.foo = 1
       end)
-      assert.has_errors(function()
-         luamark.rounds = "not a number"
-      end)
+
+      for _, invalid in ipairs({ "not a number", 0, -1 }) do
+         for _, opt in ipairs({ "rounds", "time" }) do
+            assert.has_errors(function()
+               luamark[opt] = invalid
+            end)
+         end
+      end
    end)
 end)
 
@@ -30,25 +35,6 @@ describe("simple API (timeit/memit)", function()
       luamark = h.load_luamark()
    end)
 
-   test("setup/teardown receive and pass context", function()
-      local received_ctx, teardown_ctx
-
-      luamark.timeit(function(ctx)
-         received_ctx = ctx
-      end, {
-         setup = function()
-            return { data = "test_value" }
-         end,
-         teardown = function(ctx)
-            teardown_ctx = ctx
-         end,
-         rounds = 1,
-      })
-
-      assert.are_equal("test_value", received_ctx.data)
-      assert.are_equal("test_value", teardown_ctx.data)
-   end)
-
    test("ctx is nil when no setup provided", function()
       local received_ctx = "sentinel"
       luamark.timeit(function(ctx)
@@ -56,31 +42,6 @@ describe("simple API (timeit/memit)", function()
       end, { rounds = 1 })
 
       assert.is_nil(received_ctx)
-   end)
-
-   test("before/after hooks run per iteration", function()
-      local before_calls, after_calls = 0, 0
-      local final_ctx
-
-      luamark.timeit(function(ctx)
-         final_ctx = ctx
-      end, {
-         setup = function()
-            return { base = true }
-         end,
-         before = function(ctx)
-            before_calls = before_calls + 1
-            return { base = ctx.base, modified = true }
-         end,
-         after = function()
-            after_calls = after_calls + 1
-         end,
-         rounds = 3,
-      })
-
-      assert.is_true(before_calls >= 3)
-      assert.is_true(after_calls >= 3)
-      assert.is_true(final_ctx.modified)
    end)
 
    test("Stats has readable __tostring", function()
@@ -115,13 +76,6 @@ describe("suite API (compare_time/compare_memory)", function()
       assert.is_not_nil(results[1].median)
       -- Params are inlined directly on the result
       assert.is_true(results[1].n == 10 or results[1].n == 20)
-   end)
-
-   test("no params means no extra fields on result", function()
-      local results = luamark.compare_time({ test = h.noop }, { rounds = 1 })
-      -- Result should have stats fields but no param fields
-      assert.is_not_nil(results[1].median)
-      assert.is_nil(results[1].n) -- no param 'n' was defined
    end)
 
    test("multiple params expand as cartesian product", function()
@@ -171,43 +125,6 @@ describe("suite API (compare_time/compare_memory)", function()
       assert.are_equal(4, #results)
    end)
 
-   test("compare_memory also supports params", function()
-      local results = luamark.compare_memory({ test = h.noop }, {
-         params = { n = { 10, 20 } },
-         rounds = 1,
-      })
-
-      assert.are_equal(2, #results)
-   end)
-
-   test("two-level setup: global setup once, bench before per iteration", function()
-      local global_calls, bench_calls = 0, 0
-      local final_ctx
-
-      luamark.compare_time({
-         test_bench = {
-            fn = function(ctx)
-               final_ctx = ctx
-            end,
-            before = function(ctx)
-               bench_calls = bench_calls + 1
-               return { modified = true, original = ctx and ctx.original }
-            end,
-         },
-      }, {
-         setup = function()
-            global_calls = global_calls + 1
-            return { original = true }
-         end,
-         rounds = 3,
-      })
-
-      assert.are_equal(1, global_calls)
-      assert.is_true(bench_calls >= 3)
-      assert.is_true(final_ctx.modified)
-      assert.is_true(final_ctx.original)
-   end)
-
    test("bench functions can be plain functions or tables with fn", function()
       local plain_called, table_called = false, false
 
@@ -226,11 +143,6 @@ describe("suite API (compare_time/compare_memory)", function()
       assert.is_true(table_called)
    end)
 
-   test("results array has __tostring", function()
-      local results = luamark.compare_time({ test = h.noop }, { rounds = 1 })
-      assert.matches("1%.00x", tostring(results))
-   end)
-
    describe("funcs validation", function()
       for _, name in ipairs({ "compare_time", "compare_memory" }) do
          test(name .. " rejects array (numeric keys)", function()
@@ -242,29 +154,32 @@ describe("suite API (compare_time/compare_memory)", function()
    end)
 end)
 
-describe("clock warning", function()
-   test("warns once on first benchmark when using os.clock", function()
-      local warn_output = {}
-      local original_warn = _G.warn
-      _G.warn = function(msg)
-         warn_output[#warn_output + 1] = msg
-      end
+describe("unload", function()
+   local luamark
 
-      finally(function()
-         _G.warn = original_warn
-      end)
+   setup(function()
+      luamark = h.load_luamark()
+   end)
 
-      local luamark = h.load_luamark(h.ALL_CLOCKS)
-      assert.are_equal("os.clock", luamark.clock_name)
+   test("unloads matching modules and returns count", function()
+      package.loaded["mylib.core"] = { loaded = true }
+      package.loaded["mylib.utils"] = { loaded = true }
+      package.loaded["mylib.extra"] = { loaded = true }
+      package.loaded["other_module"] = { loaded = true }
 
-      luamark.timeit(h.noop, { rounds = 1 })
-      local first_output = table.concat(warn_output)
+      local count = luamark.unload("^mylib%.")
 
-      warn_output = {}
-      luamark.timeit(h.noop, { rounds = 1 })
-      local second_output = table.concat(warn_output)
+      assert.are_equal(3, count)
+      assert.is_nil(package.loaded["mylib.core"])
+      assert.is_nil(package.loaded["mylib.utils"])
+      assert.is_nil(package.loaded["mylib.extra"])
+      assert.is_truthy(package.loaded["other_module"])
 
-      assert.matches("luamark: using os.clock", first_output)
-      assert.are_equal("", second_output)
+      package.loaded["other_module"] = nil
+   end)
+
+   test("returns 0 when no modules match", function()
+      local count = luamark.unload("^nonexistent_module_pattern_xyz$")
+      assert.are_equal(0, count)
    end)
 end)

@@ -64,10 +64,52 @@ end
 
 local function noop() end
 
+--- Verify stats object exists and all its fields are non-nil.
+---@param stats table
+local function assert_stats_valid(stats)
+   assert(stats, "stats should not be nil")
+   for field, value in pairs(stats) do
+      assert(value ~= nil, "stats." .. field .. " should not be nil")
+   end
+end
+
+--- Create a mock benchmark result row (flat structure).
+---@param name string
+---@param median number
+---@param rank_value integer
+---@param ratio_value number
+---@param opts? {unit?: "s"|"kb", ci_lower?: number, ci_upper?: number, is_approximate?: boolean}
+---@return table
+local function make_result_row(name, median, rank_value, ratio_value, opts)
+   opts = opts or {}
+   local unit = opts.unit or "s"
+   local ci_lower = opts.ci_lower or (median * 0.9)
+   local ci_upper = opts.ci_upper or (median * 1.1)
+   local row = {
+      name = name,
+      median = median,
+      ci_lower = ci_lower,
+      ci_upper = ci_upper,
+      ci_margin = (ci_upper - ci_lower) / 2,
+      rounds = 10,
+      iterations = 1000,
+      unit = unit,
+      rank = rank_value,
+      ratio = ratio_value,
+      is_approximate = opts.is_approximate or false,
+   }
+   if unit == "s" and median > 0 then
+      row.ops = 1 / median
+   end
+   return row
+end
+
 return {
    ALL_CLOCKS = ALL_CLOCKS,
    CLOCKS = CLOCKS,
+   assert_stats_valid = assert_stats_valid,
    clocks_except = clocks_except,
    load_luamark = load_luamark,
+   make_result_row = make_result_row,
    noop = noop,
 }

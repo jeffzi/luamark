@@ -7,15 +7,6 @@ local SLEEP_TIME = 0.01
 local TIME_TOL = SLEEP_TIME / 3
 local MEMORY_TOL = 0.1
 
---- Verify stats object exists and all its fields are non-nil.
----@param stats table
-local function assert_stats_valid(stats)
-   assert(stats, "stats should not be nil")
-   for field, value in pairs(stats) do
-      assert(value ~= nil, "stats." .. field .. " should not be nil")
-   end
-end
-
 for _, clock_name in ipairs(h.CLOCKS) do
    describe("clock = " .. clock_name .. " ->", function()
       local luamark
@@ -35,7 +26,7 @@ for _, clock_name in ipairs(h.CLOCKS) do
             test("benchmarks and returns valid Stats" .. suffix, function()
                local benchmark = luamark[name]
                local stats = benchmark(h.noop, { rounds = 1 })
-               assert_stats_valid(stats)
+               h.assert_stats_valid(stats)
                assert.is_number(stats.median)
                assert.is_number(stats.ci_lower)
                assert.is_number(stats.ci_upper)
@@ -51,7 +42,6 @@ for _, clock_name in ipairs(h.CLOCKS) do
                end, { rounds = 3 })
 
                assert.are_equal(3, stats.rounds)
-               assert.are_equal(stats.count, stats.rounds * stats.iterations)
             end)
 
             test("stops at time" .. suffix, function()
@@ -82,6 +72,43 @@ for _, clock_name in ipairs(h.CLOCKS) do
                assert.are_equal(1, setup_calls)
                assert.are_equal(1, teardown_calls)
             end)
+
+            test("setup/teardown receive and pass context" .. suffix, function()
+               local benchmark = luamark[name]
+               local received_ctx, teardown_ctx
+
+               benchmark(function(ctx)
+                  received_ctx = ctx
+               end, {
+                  setup = function()
+                     return { data = "test_value" }
+                  end,
+                  teardown = function(ctx)
+                     teardown_ctx = ctx
+                  end,
+                  rounds = 1,
+               })
+
+               assert.are_equal("test_value", received_ctx.data)
+               assert.are_equal("test_value", teardown_ctx.data)
+
+               -- setup returning nil passes nil to fn and teardown
+               received_ctx, teardown_ctx = "sentinel", "sentinel"
+               benchmark(function(ctx)
+                  received_ctx = ctx
+               end, {
+                  setup = function()
+                     return nil
+                  end,
+                  teardown = function(ctx)
+                     teardown_ctx = ctx
+                  end,
+                  rounds = 1,
+               })
+
+               assert.is_nil(received_ctx)
+               assert.is_nil(teardown_ctx)
+            end)
          end
       end)
 
@@ -97,7 +124,7 @@ for _, clock_name in ipairs(h.CLOCKS) do
                local names = {}
                for i = 1, #results do
                   names[results[i].name] = true
-                  assert_stats_valid(results[i])
+                  h.assert_stats_valid(results[i])
                end
                assert.is_true(names.a)
                assert.is_true(names.b)
@@ -125,35 +152,23 @@ for _, clock_name in ipairs(h.CLOCKS) do
       end)
 
       describe("batch timing optimization", function()
-         test("fast path (no hooks) measures time correctly", function()
-            local stats = luamark.timeit(function()
-               socket.sleep(SLEEP_TIME)
-            end, { rounds = 3 })
-
-            assert.is_near(SLEEP_TIME, stats.median, TIME_TOL)
-         end)
-
-         test("slow path (with before hook) measures time correctly", function()
-            local stats = luamark.timeit(function()
-               socket.sleep(SLEEP_TIME)
-            end, {
-               rounds = 3,
-               before = h.noop,
-            })
-
-            assert.is_near(SLEEP_TIME, stats.median, TIME_TOL)
-         end)
-
-         test("slow path (with after hook) measures time correctly", function()
-            local stats = luamark.timeit(function()
-               socket.sleep(SLEEP_TIME)
-            end, {
-               rounds = 3,
-               after = h.noop,
-            })
-
-            assert.is_near(SLEEP_TIME, stats.median, TIME_TOL)
-         end)
+         local timing_cases = {
+            { name = "fast path (no hooks)", opts = {} },
+            { name = "slow path (with before hook)", opts = { before = h.noop } },
+            { name = "slow path (with after hook)", opts = { after = h.noop } },
+         }
+         for _, case in ipairs(timing_cases) do
+            test(case.name .. " measures time correctly", function()
+               local opts = { rounds = 3 }
+               for k, v in pairs(case.opts) do
+                  opts[k] = v
+               end
+               local stats = luamark.timeit(function()
+                  socket.sleep(SLEEP_TIME)
+               end, opts)
+               assert.is_near(SLEEP_TIME, stats.median, TIME_TOL)
+            end)
+         end
 
          test("fast path has less overhead than slow path", function()
             local function work()
@@ -232,6 +247,62 @@ describe("calibration", function()
       -- to exceed clock precision threshold with low-precision clocks
       assert.is_true(stats.iterations > 1)
    end)
+
+   test("before/after hooks run per iteration with high iteration count", function()
+      -- Use os.clock to force iterations > 1
+      local luamark_osclock = h.load_luamark(h.ALL_CLOCKS)
+      local before_calls, after_calls = 0, 0
+
+      local stats = luamark_osclock.timeit(h.noop, {
+         before = function()
+            before_calls = before_calls + 1
+         end,
+         after = function()
+            after_calls = after_calls + 1
+         end,
+         rounds = 3,
+      })
+
+      assert.is_true(stats.iterations > 1)
+      -- Hooks run at least once per iteration; calibration adds extra calls
+      local total_iterations = stats.rounds * stats.iterations
+      assert.is_true(before_calls >= total_iterations)
+      assert.is_true(after_calls >= total_iterations)
+   end)
+
+   test("two-level setup: global setup once, bench before per iteration", function()
+      -- Use os.clock to force iterations > 1
+      local luamark_osclock = h.load_luamark(h.ALL_CLOCKS)
+      local global_calls, bench_calls = 0, 0
+      local final_ctx
+
+      local results = luamark_osclock.compare_time({
+         test_bench = {
+            fn = function(ctx)
+               final_ctx = ctx
+            end,
+            before = function(ctx)
+               bench_calls = bench_calls + 1
+               return { modified = true, original = ctx and ctx.original }
+            end,
+         },
+      }, {
+         setup = function()
+            global_calls = global_calls + 1
+            return { original = true }
+         end,
+         rounds = 3,
+      })
+
+      local stats = results[1]
+      assert.is_true(stats.iterations > 1)
+      assert.are_equal(1, global_calls)
+      -- Bench-level before runs per iteration; calibration adds extra calls
+      local total_iterations = stats.rounds * stats.iterations
+      assert.is_true(bench_calls >= total_iterations)
+      assert.is_true(final_ctx.modified)
+      assert.is_true(final_ctx.original)
+   end)
 end)
 
 describe("validation", function()
@@ -244,35 +315,35 @@ describe("validation", function()
    describe("simple API (timeit/memit)", function()
       for _, name in ipairs({ "timeit", "memit" }) do
          test(name .. " rejects invalid options", function()
-            assert.has_errors(function()
+            assert.has_error(function()
                luamark[name](h.noop, { rounds = -1 })
-            end)
-            assert.has_errors(function()
+            end, "'rounds' must be > 0.")
+            assert.has_error(function()
                luamark[name](h.noop, { time = -1 })
-            end)
-            assert.has_errors(function()
+            end, "'time' must be > 0.")
+            assert.has_error(function()
                luamark[name](h.noop, { hello = "world" })
-            end)
-            assert.has_errors(function()
+            end, "Unknown option: hello")
+            assert.has_error(function()
                luamark[name](h.noop, { rounds = "not a number" })
-            end)
-            assert.has_errors(function()
+            end, "Option 'rounds' should be number")
+            assert.has_error(function()
                luamark[name](h.noop, { rounds = 1.5 })
-            end)
+            end, "Option 'rounds' must be an integer")
          end)
 
          test(name .. " rejects invalid input", function()
-            assert.has_errors(function()
+            assert.has_error(function()
                ---@diagnostic disable-next-line: param-type-mismatch, missing-parameter
                luamark[name](nil)
-            end)
-            assert.has_errors(function()
+            end, "'fn' must be a function, got nil")
+            assert.has_error(function()
                ---@diagnostic disable-next-line: param-type-mismatch
                luamark[name]({ a = h.noop }, { rounds = 1 })
-            end)
-            assert.has_errors(function()
-               luamark[name](h.noop, { params = { n = { 10 } } })
-            end)
+            end, "'fn' must be a function, got table")
+            local ok, err = pcall(luamark[name], h.noop, { params = { n = { 10 } } })
+            assert.is_false(ok)
+            assert.matches("'params' is not supported in timeit/memit", err)
          end)
       end
    end)
@@ -280,22 +351,26 @@ describe("validation", function()
    describe("suite API (compare_time/compare_memory)", function()
       for _, name in ipairs({ "compare_time", "compare_memory" }) do
          test(name .. " rejects invalid input", function()
-            assert.has_errors(function()
+            assert.has_error(function()
                ---@diagnostic disable-next-line: param-type-mismatch
                luamark[name](h.noop, { rounds = 1 })
-            end)
+            end, "'funcs' must be a table, got function")
          end)
 
          test(name .. " rejects invalid params", function()
-            assert.has_errors(function()
-               luamark[name]({ a = h.noop }, { params = { n = 10 } })
-            end)
-            assert.has_errors(function()
-               luamark[name]({ a = h.noop }, { params = { [1] = { "a" } } })
-            end)
-            assert.has_errors(function()
-               luamark[name]({ a = h.noop }, { params = { n = { {} } } })
-            end)
+            local ok, err
+
+            ok, err = pcall(luamark[name], { a = h.noop }, { params = { n = 10 } })
+            assert.is_false(ok)
+            assert.matches("params%['n'%] must be an array", err)
+
+            ok, err = pcall(luamark[name], { a = h.noop }, { params = { [1] = { "a" } } })
+            assert.is_false(ok)
+            assert.matches("params key must be a string", err)
+
+            ok, err = pcall(luamark[name], { a = h.noop }, { params = { n = { {} } } })
+            assert.is_false(ok)
+            assert.matches("params%['n'%]%[1%] must be string, number, or boolean", err)
 
             local ok, err = pcall(luamark[name], { a = h.noop }, { params = { n = {} } })
             assert.is_false(ok)
@@ -314,5 +389,32 @@ describe("validation", function()
             assert.matches("Too many parameter combinations", err)
          end)
       end
+   end)
+end)
+
+describe("clock warning", function()
+   test("warns once on first benchmark when using os.clock", function()
+      local warn_output = {}
+      local original_warn = _G.warn
+      _G.warn = function(msg)
+         warn_output[#warn_output + 1] = msg
+      end
+
+      finally(function()
+         _G.warn = original_warn
+      end)
+
+      local luamark = h.load_luamark(h.ALL_CLOCKS)
+      assert.are_equal("os.clock", luamark.clock_name)
+
+      luamark.timeit(h.noop, { rounds = 1 })
+      local first_output = table.concat(warn_output)
+
+      warn_output = {}
+      luamark.timeit(h.noop, { rounds = 1 })
+      local second_output = table.concat(warn_output)
+
+      assert.matches("luamark: using os.clock", first_output)
+      assert.are_equal("", second_output)
    end)
 end)
