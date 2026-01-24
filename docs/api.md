@@ -219,6 +219,10 @@ local results = luamark.compare_time({ a = fn_a, b = fn_b })
 print(results)  -- Prints bar chart (short format)
 ```
 
+**Sorting:** Results are sorted by parameter group (alphabetically), then by rank
+within each group (fastest first). This means you can iterate over results in
+display order without additional sorting.
+
 Results have a flat structure with stats and params merged directly:
 
 ```lua

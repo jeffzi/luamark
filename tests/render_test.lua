@@ -111,16 +111,31 @@ describe("render", function()
    end)
 
    test("approximate rank indicator appears when CIs overlap", function()
+      -- Complex scenario: 5 functions with 2 overlap groups and 1 distinct
+      -- Group 1: alpha and bravo overlap (both rank 1)
+      -- Group 2: charlie and delta overlap (both rank 3)
+      -- Distinct: echo (rank 5)
       local results = {
-         make_row("fast", 0.001, 1, 1.0, { is_approximate = true }),
-         make_row("medium", 0.0011, 1, 1.1, { is_approximate = true }),
-         make_row("slow", 0.002, 3, 2.0),
+         make_row("alpha", 0.001, 1, 1.0, { is_approximate = true }),
+         make_row("bravo", 0.0011, 1, 1.1, { is_approximate = true }),
+         make_row("charlie", 0.005, 3, 5.0, { is_approximate = true }),
+         make_row("delta", 0.0055, 3, 5.5, { is_approximate = true }),
+         make_row("echo", 0.010, 5, 10.0),
       }
       local output = luamark.render(results)
 
+      -- Verify approximate ranks appear for overlapping groups
       assert.matches("≈1", output)
-      assert.matches("%s3%s", output)
-      assert.not_matches("≈3", output)
+      assert.matches("≈3", output)
+      -- Verify distinct rank appears without approximation
+      assert.matches("%s5%s", output)
+      assert.not_matches("≈5", output)
+      -- Verify all function names appear
+      assert.matches("alpha", output)
+      assert.matches("bravo", output)
+      assert.matches("charlie", output)
+      assert.matches("delta", output)
+      assert.matches("echo", output)
    end)
 
    test("humanize_time and humanize_memory handle scale and sub-unit rounding", function()

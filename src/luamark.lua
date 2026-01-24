@@ -193,7 +193,7 @@ end
 --- Calculate 95% confidence interval for median using bootstrap resampling.
 ---@param samples number[] Raw samples (will be sorted in place).
 ---@param n_resamples integer Number of bootstrap resamples.
----@return {lower: number, upper: number}
+---@return number lower, number upper
 local function bootstrap_ci(samples, n_resamples)
    local n = #samples
 
@@ -215,10 +215,7 @@ local function bootstrap_ci(samples, n_resamples)
    local lower_idx = math_max(1, math_floor(n_resamples * 0.025))
    local upper_idx = math_min(n_resamples, math_ceil(n_resamples * 0.975))
 
-   return {
-      lower = medians[lower_idx],
-      upper = medians[upper_idx],
-   }
+   return medians[lower_idx], medians[upper_idx]
 end
 
 ---@class luamark.BaseStats
@@ -229,8 +226,8 @@ end
 ---@field ci_margin number Half-width of confidence interval ((upper - lower) / 2).
 ---@field total number Sum of all samples.
 ---@field samples number[] Raw samples (sorted).
----@field ratio? number Ratio relative to fastest benchmark (added by rank()).
----@field rank? integer Rank (added by rank()).
+---@field ratio? number Ratio relative to fastest benchmark.
+---@field rank? integer Rank within benchmark group.
 
 ---@class luamark.Stats : luamark.BaseStats
 ---@field rounds integer Number of benchmark rounds executed.
@@ -258,9 +255,7 @@ local function calculate_stats(samples)
    local ci_lower, ci_upper, ci_margin
    -- Bootstrap CI requires at least 3 samples for meaningful resampling variation
    if count >= 3 then
-      local ci = bootstrap_ci(samples, BOOTSTRAP_RESAMPLES)
-      ci_lower = ci.lower
-      ci_upper = ci.upper
+      ci_lower, ci_upper = bootstrap_ci(samples, BOOTSTRAP_RESAMPLES)
       ci_margin = (ci_upper - ci_lower) / 2
    else
       ci_lower = median
@@ -279,43 +274,123 @@ local function calculate_stats(samples)
    }
 end
 
---- Rank benchmark results by specified key, adding 'rank' and 'ratio' fields.
---- Smallest value gets rank 1 and ratio 1.0; other ratios are relative to it.
----@param results {[string]: luamark.Stats|luamark.Result} Benchmark results indexed by name.
----@param key string Stats field to rank by.
----@return {[string]: luamark.Stats|luamark.Result}
-local function rank(results, key)
-   assert(results and next(results), "'results' is nil or empty.")
+-- ----------------------------------------------------------------------------
+-- Result helpers
+-- ----------------------------------------------------------------------------
 
-   local sorted = {}
-   for name, stats in pairs(results) do
-      sorted[#sorted + 1] = { name = name, value = stats[key] }
-   end
+---@class luamark.Result : luamark.BaseStats
+---@field name string Benchmark name.
+---@field rounds integer Number of benchmark rounds executed.
+---@field iterations integer Number of iterations per round.
+---@field timestamp string ISO 8601 UTC timestamp of benchmark start.
+---@field unit "s"|"kb" Measurement unit (seconds or kilobytes).
+---@field ops? number Operations per second (1/median). Only present for time benchmarks.
+---@field ratio? number Ratio relative to fastest benchmark.
+---@field rank? integer Rank accounting for CI overlap (tied results share the same rank).
+---@field is_approximate? boolean True if rank is approximate due to overlapping CIs.
+-- Plus any param keys inlined directly on the result (e.g., result.n, result.size)
 
-   table_sort(sorted, function(a, b)
-      return a.value < b.value
-   end)
+-- Keys that are part of stats, not user params
+local STAT_KEYS = {
+   name = true,
+   count = true,
+   median = true,
+   ci_lower = true,
+   ci_upper = true,
+   ci_margin = true,
+   total = true,
+   samples = true,
+   rounds = true,
+   iterations = true,
+   timestamp = true,
+   unit = true,
+   ops = true,
+   ratio = true,
+   rank = true,
+   is_approximate = true,
+}
 
-   local min_value = sorted[1].value
-   local prev_value = min_value
-   local current_rank = 1
-
-   for i, entry in ipairs(sorted) do
-      local name, value = entry.name, entry.value
-
-      if value ~= prev_value then
-         current_rank = i
-         prev_value = value
+---Collect all unique parameter names from flat result rows.
+---@param rows luamark.Result[]
+---@return string[]
+local function collect_param_names(rows)
+   local seen = {}
+   for i = 1, #rows do
+      for key in pairs(rows[i]) do
+         if not STAT_KEYS[key] then
+            seen[key] = true
+         end
       end
+   end
+   return sorted_keys(seen)
+end
 
-      local result = results[name]
-      result.rank = current_rank
+---Format parameter values as a readable string from flat result.
+---@param row luamark.Result
+---@param param_names string[]
+---@return string
+local function format_params(row, param_names)
+   local parts = {}
+   for i = 1, #param_names do
+      local name = param_names[i]
+      if row[name] ~= nil then
+         parts[#parts + 1] = name .. "=" .. tostring(row[name])
+      end
+   end
+   return table.concat(parts, ", ")
+end
 
-      local can_compute_ratio = current_rank > 1 and min_value > 0
-      result.ratio = can_compute_ratio and (value / min_value) or 1
+local function compare_by_median(a, b)
+   return a.median < b.median
+end
+
+---Rank benchmark results within each parameter combination.
+---Uses transitive overlap grouping: results with overlapping CIs share the same rank.
+---Results are sorted in place: grouped by parameters, then by rank within each group.
+---@param results luamark.Result[]
+---@param param_names string[]
+local function rank_results(results, param_names)
+   local groups = {}
+   for i = 1, #results do
+      local row = results[i]
+      local key = format_params(row, param_names)
+      groups[key] = groups[key] or {}
+      groups[key][#groups[key] + 1] = row
    end
 
-   return results
+   for _, group in pairs(groups) do
+      table_sort(group, compare_by_median)
+
+      local first = group[1]
+      local min_median = first.median
+      first.ratio = 1
+      first.rank = 1
+      first.is_approximate = false
+
+      for i = 2, #group do
+         local r = group[i]
+         local prev = group[i - 1]
+         r.ratio = min_median > 0 and (r.median / min_median) or 1
+
+         if r.ci_lower <= prev.ci_upper and prev.ci_lower <= r.ci_upper then
+            r.rank = prev.rank
+            r.is_approximate = true
+            prev.is_approximate = true
+         else
+            r.rank = i
+            r.is_approximate = false
+         end
+      end
+   end
+
+   -- Reorder results: grouped by params (sorted), then by rank within each group
+   local idx = 1
+   for _, key in ipairs(sorted_keys(groups)) do
+      for _, row in ipairs(groups[key]) do
+         results[idx] = row
+         idx = idx + 1
+      end
+   end
 end
 
 -- ----------------------------------------------------------------------------
@@ -635,26 +710,15 @@ local function render_plain_table(rows, widths)
 end
 
 ---Render summary table (plain/compact).
----@param results {[string]: luamark.Stats|luamark.Result}
+---@param results luamark.Result[] Results array (already sorted by rank).
 ---@param format "plain"|"compact"
 ---@param max_width? integer
 ---@return string
 local function render_summary(results, format, max_width)
-   results = rank(results, "median")
-
-   local sorted_names = {}
-   for name in pairs(results) do
-      sorted_names[#sorted_names + 1] = name
-   end
-   table_sort(sorted_names, function(a, b)
-      return results[a].rank < results[b].rank
-   end)
-
    local rows = {}
-   for i = 1, #sorted_names do
-      local name = sorted_names[i]
-      local row = format_row(results[name])
-      row.name = name
+   for i = 1, #results do
+      local row = format_row(results[i])
+      row.name = results[i].name
       rows[i] = row
    end
 
@@ -667,113 +731,6 @@ local function render_summary(results, format, max_width)
    local widths = calculate_column_widths(rows)
    fit_names(rows, widths, max_width)
    return render_plain_table(rows, widths)
-end
-
--- ----------------------------------------------------------------------------
--- Result helpers
--- ----------------------------------------------------------------------------
-
----@class luamark.Result : luamark.BaseStats
----@field name string Benchmark name.
----@field rounds integer Number of benchmark rounds executed.
----@field iterations integer Number of iterations per round.
----@field timestamp string ISO 8601 UTC timestamp of benchmark start.
----@field unit "s"|"kb" Measurement unit (seconds or kilobytes).
----@field ops? number Operations per second (1/median). Only present for time benchmarks.
----@field ratio? number Ratio relative to fastest benchmark.
----@field rank? integer Rank accounting for CI overlap (tied results share the same rank).
----@field is_approximate? boolean True if rank is approximate due to overlapping CIs.
--- Plus any param keys inlined directly on the result (e.g., result.n, result.size)
-
--- Keys that are part of stats, not user params
-local STAT_KEYS = {
-   name = true,
-   count = true,
-   median = true,
-   ci_lower = true,
-   ci_upper = true,
-   ci_margin = true,
-   total = true,
-   samples = true,
-   rounds = true,
-   iterations = true,
-   timestamp = true,
-   unit = true,
-   ops = true,
-   ratio = true,
-   rank = true,
-   is_approximate = true,
-}
-
----Collect all unique parameter names from flat result rows.
----@param rows luamark.Result[]
----@return string[]
-local function collect_param_names(rows)
-   local seen = {}
-   for i = 1, #rows do
-      for key in pairs(rows[i]) do
-         if not STAT_KEYS[key] then
-            seen[key] = true
-         end
-      end
-   end
-   return sorted_keys(seen)
-end
-
----Format parameter values as a readable string from flat result.
----@param row luamark.Result
----@param param_names string[]
----@return string
-local function format_params(row, param_names)
-   local parts = {}
-   for i = 1, #param_names do
-      local name = param_names[i]
-      if row[name] ~= nil then
-         parts[#parts + 1] = name .. "=" .. tostring(row[name])
-      end
-   end
-   return table.concat(parts, ", ")
-end
-
----Rank benchmark results within each parameter combination.
----Uses transitive overlap grouping: results with overlapping CIs share the same rank.
----@param results luamark.Result[]
----@param param_names string[]
-local function rank_results(results, param_names)
-   local groups = {}
-   for i = 1, #results do
-      local row = results[i]
-      local key = format_params(row, param_names)
-      groups[key] = groups[key] or {}
-      groups[key][#groups[key] + 1] = row
-   end
-
-   for _, group in pairs(groups) do
-      table_sort(group, function(a, b)
-         return a.median < b.median
-      end)
-
-      local first = group[1]
-      local min_median = first.median
-      first.ratio = 1
-      first.rank = 1
-      first.is_approximate = false
-
-      for i = 2, #group do
-         local r = group[i]
-         local prev = group[i - 1]
-         r.ratio = min_median > 0 and (r.median / min_median) or 1
-
-         if r.ci_lower <= prev.ci_upper and prev.ci_lower <= r.ci_upper then
-            r.rank = prev.rank
-            r.is_approximate = true
-            prev.is_approximate = true
-         else
-            r.rank = i
-            r.is_approximate = false
-         end
-      end
-   end
 end
 
 -- ----------------------------------------------------------------------------
@@ -1356,12 +1313,12 @@ function luamark.render(results, short, max_width)
    local param_names = collect_param_names(results)
 
    -- Group by params (single group with key "" if no params)
-   local groups = {} ---@type table<string, {[string]: luamark.Result}>
+   local groups = {} ---@type table<string, luamark.Result[]>
    for i = 1, #results do
       local row = results[i]
       local key = format_params(row, param_names)
       groups[key] = groups[key] or {}
-      groups[key][row.name] = row
+      groups[key][#groups[key] + 1] = row
    end
 
    local group_keys = sorted_keys(groups)
@@ -1440,9 +1397,10 @@ end
 
 --- Compare multiple functions for execution time.
 --- Time is represented in seconds.
+--- Results are sorted by parameter group, then by rank (fastest first) within each group.
 ---@param funcs table<string, function|luamark.Spec> Table of named functions or Specs to benchmark.
 ---@param opts? luamark.SuiteOptions Benchmark configuration with optional params.
----@return luamark.Result[] Flat array of benchmark results with ranking.
+---@return luamark.Result[] Sorted array of benchmark results with ranking.
 function luamark.compare_time(funcs, opts)
    assert(type(funcs) == "table", "'funcs' must be a table, got " .. type(funcs))
    validate_funcs(funcs)
@@ -1453,9 +1411,10 @@ end
 
 --- Compare multiple functions for memory usage.
 --- Memory is represented in kilobytes.
+--- Results are sorted by parameter group, then by rank (fastest first) within each group.
 ---@param funcs table<string, function|luamark.Spec> Table of named functions or Specs to benchmark.
 ---@param opts? luamark.SuiteOptions Benchmark configuration with optional params.
----@return luamark.Result[] Flat array of benchmark results with ranking.
+---@return luamark.Result[] Sorted array of benchmark results with ranking.
 function luamark.compare_memory(funcs, opts)
    assert(type(funcs) == "table", "'funcs' must be a table, got " .. type(funcs))
    validate_funcs(funcs)
@@ -1519,7 +1478,6 @@ if rawget(_G, "_TEST") then
       humanize = humanize,
       measure_memory = measure_memory,
       measure_time = measure_time,
-      rank = rank,
       rank_results = rank_results,
    }
 end

@@ -2,54 +2,6 @@
 
 local h = require("tests.helpers")
 
-describe("rank", function()
-   local rank
-
-   setup(function()
-      rank = h.load_luamark()._internal.rank
-   end)
-
-   test("assigns rank and ratio based on values", function()
-      local data = {
-         test1 = { median = 8 },
-         test2 = { median = 20 },
-         test3 = { median = 5 },
-      }
-      rank(data, "median")
-      assert.are_same({ rank = 1, median = 5, ratio = 1 }, data.test3)
-      assert.are_same({ rank = 2, median = 8, ratio = 1.6 }, data.test1)
-      assert.are_same({ rank = 3, median = 20, ratio = 4 }, data.test2)
-   end)
-
-   test("handles zero minimum and identical values", function()
-      local zero_data = {
-         test1 = { median = 0 },
-         test2 = { median = 10 },
-      }
-      rank(zero_data, "median")
-      assert.are_equal(1, zero_data.test1.rank)
-      assert.are_equal(1, zero_data.test1.ratio)
-
-      local same_data = {
-         test1 = { median = 10 },
-         test2 = { median = 10 },
-      }
-      rank(same_data, "median")
-      assert.are_equal(1, same_data.test1.rank)
-      assert.are_equal(1, same_data.test2.rank)
-   end)
-
-   test("rejects nil and empty input", function()
-      assert.has_error(function()
-         rank({}, "foo")
-      end, "'results' is nil or empty.")
-      assert.has_error(function()
-         ---@diagnostic disable-next-line: param-type-mismatch
-         rank(nil, "bar")
-      end, "'results' is nil or empty.")
-   end)
-end)
-
 describe("calculate_stats", function()
    local calculate_stats
 
@@ -116,10 +68,10 @@ describe("bootstrap_ci", function()
    test("returns lower and upper bounds", function()
       math.randomseed(12345)
       local samples = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 }
-      local ci = bootstrap_ci(samples, 1000)
-      assert.is_number(ci.lower)
-      assert.is_number(ci.upper)
-      assert.is_true(ci.lower <= ci.upper)
+      local lower, upper = bootstrap_ci(samples, 1000)
+      assert.is_number(lower)
+      assert.is_number(upper)
+      assert.is_true(lower <= upper)
    end)
 
    test("CI width decreases with more samples", function()
@@ -133,11 +85,11 @@ describe("bootstrap_ci", function()
          large_samples[i] = (i % 10) + 1
       end
 
-      local ci_small = bootstrap_ci(small_samples, 1000)
-      local ci_large = bootstrap_ci(large_samples, 1000)
+      local small_lower, small_upper = bootstrap_ci(small_samples, 1000)
+      local large_lower, large_upper = bootstrap_ci(large_samples, 1000)
 
-      local width_small = ci_small.upper - ci_small.lower
-      local width_large = ci_large.upper - ci_large.lower
+      local width_small = small_upper - small_lower
+      local width_large = large_upper - large_lower
       assert.is_true(width_large <= width_small)
    end)
 end)
