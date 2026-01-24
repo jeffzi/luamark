@@ -25,12 +25,12 @@ Read-only string indicating which clock module is in use.
 
 luamark provides two APIs:
 
-| Function | Input | Returns | `params` |
-| -------- | ----- | ------- | -------- |
-| [`timeit`](#timeit) | function | [`Stats`](#stats) | No |
-| [`memit`](#memit) | function | [`Stats`](#stats) | No |
-| [`compare_time`](#compare_time) | table | [`Result[]`](#result) | Yes |
-| [`compare_memory`](#compare_memory) | table | [`Result[]`](#result) | Yes |
+| Function                            | Input    | Returns               | `params` |
+| ----------------------------------- | -------- | --------------------- | -------- |
+| [`timeit`](#timeit)                 | function | [`Stats`](#stats)     | No       |
+| [`memit`](#memit)                   | function | [`Stats`](#stats)     | No       |
+| [`compare_time`](#compare_time)     | table    | [`Result[]`](#result) | Yes      |
+| [`compare_memory`](#compare_memory) | table    | [`Result[]`](#result) | Yes      |
 
 ---
 
@@ -219,6 +219,10 @@ local results = luamark.compare_time({ a = fn_a, b = fn_b })
 print(results)  -- Prints bar chart (short format)
 ```
 
+**Sorting:** Results are sorted by parameter group (alphabetically), then by rank
+within each group (fastest first). This means you can iterate over results in
+display order without additional sorting.
+
 Results have a flat structure with stats and params merged directly:
 
 ```lua
@@ -232,14 +236,13 @@ print(result.n)        -- 100 (param field, if params = {n = {100}} was used)
 | Field          | Type      | Description                                              |
 | -------------- | --------- | -------------------------------------------------------- |
 | name           | string    | Benchmark name                                           |
-| count          | integer   | Number of samples collected                              |
 | median         | number    | Median value of samples                                  |
 | ci_lower       | number    | Lower bound of 95% CI for median                         |
 | ci_upper       | number    | Upper bound of 95% CI for median                         |
 | ci_margin      | number    | Half-width of CI ((upper - lower) / 2)                   |
 | total          | number    | Sum of all samples                                       |
 | samples        | number[]  | Raw samples (sorted)                                     |
-| rounds         | integer   | Number of benchmark rounds executed                      |
+| rounds         | integer   | Number of rounds (samples) collected                     |
 | iterations     | integer   | Number of iterations per round                           |
 | timestamp      | string    | ISO 8601 UTC timestamp of benchmark start                |
 | unit           | "s"\|"kb" | Measurement unit (seconds or kilobytes)                  |
@@ -247,7 +250,7 @@ print(result.n)        -- 100 (param field, if params = {n = {100}} was used)
 | rank           | integer?  | Rank accounting for CI overlap                           |
 | ratio          | number?   | Ratio to fastest                                         |
 | is_approximate | boolean?  | True if rank is tied due to CI overlap                   |
-| *param_name*   | any       | Any param values are inlined directly (e.g., `result.n`) |
+| _param_name_   | any       | Any param values are inlined directly (e.g., `result.n`) |
 
 ---
 
@@ -324,23 +327,22 @@ local stats = luamark.timeit(fn, { rounds = 10 })
 print(stats)  -- "250ns ± 0ns"
 ```
 
-| Field          | Type      | Description                                              |
-| -------------- | --------- | -------------------------------------------------------- |
-| count          | integer   | Number of samples collected                              |
-| median         | number    | Median value of samples                                  |
-| ci_lower       | number    | Lower bound of 95% CI for median                         |
-| ci_upper       | number    | Upper bound of 95% CI for median                         |
-| ci_margin      | number    | Half-width of CI ((upper - lower) / 2)                   |
-| total          | number    | Sum of all samples                                       |
-| samples        | number[]  | Raw samples (sorted)                                     |
-| rounds         | integer   | Number of benchmark rounds executed                      |
-| iterations     | integer   | Number of iterations per round                           |
-| timestamp      | string    | ISO 8601 UTC timestamp of benchmark start                |
-| unit           | "s"\|"kb" | Measurement unit (seconds or kilobytes)                  |
-| ops            | number?   | Operations per second (1/median, time benchmarks only)   |
-| rank           | integer?  | Rank accounting for CI overlap (`compare_*` only)        |
-| ratio          | number?   | Ratio to fastest (`compare_*` only)                      |
-| is_approximate | boolean?  | True if rank is tied due to CI overlap (`compare_*` only)|
+| Field          | Type      | Description                                               |
+| -------------- | --------- | --------------------------------------------------------- |
+| median         | number    | Median value of samples                                   |
+| ci_lower       | number    | Lower bound of 95% CI for median                          |
+| ci_upper       | number    | Upper bound of 95% CI for median                          |
+| ci_margin      | number    | Half-width of CI ((upper - lower) / 2)                    |
+| total          | number    | Sum of all samples                                        |
+| samples        | number[]  | Raw samples (sorted)                                      |
+| rounds         | integer   | Number of rounds (samples) collected                      |
+| iterations     | integer   | Number of iterations per round                            |
+| timestamp      | string    | ISO 8601 UTC timestamp of benchmark start                 |
+| unit           | "s"\|"kb" | Measurement unit (seconds or kilobytes)                   |
+| ops            | number?   | Operations per second (1/median, time benchmarks only)    |
+| rank           | integer?  | Rank accounting for CI overlap (`compare_*` only)         |
+| ratio          | number?   | Ratio to fastest (`compare_*` only)                       |
+| is_approximate | boolean?  | True if rank is tied due to CI overlap (`compare_*` only) |
 
 **Rank display:** When results have overlapping confidence intervals, they share the
 same rank with an `≈` prefix. For example, `≈1 ≈1 3` means the first two results have
@@ -363,14 +365,14 @@ function luamark.render(
 
 Render benchmark results as a formatted string.
 
-@*param* `results` — Benchmark results ([`Result`](#result) array from [`compare_time`](#compare_time)/[`compare_memory`](#compare_memory)).
+@_param_ `results` — Benchmark results ([`Result`](#result) array from [`compare_time`](#compare_time)/[`compare_memory`](#compare_memory)).
 
-@*param* `short` — Output format.
+@_param_ `short` — Output format.
 
 - `false` or `nil` (default): Full table with embedded bar chart in ratio column
 - `true`: Bar chart only (compact)
 
-@*param* `max_width` — Maximum output width (default: terminal width).
+@_param_ `max_width` — Maximum output width (default: terminal width).
 
 ```lua
 -- Full table (default)
@@ -388,9 +390,9 @@ function luamark.humanize_time(s: number) -> string
 
 Format a time value to a human-readable string. Selects the best unit automatically (m, s, ms, us, ns).
 
-@*param* `s` — Time in seconds.
+@_param_ `s` — Time in seconds.
 
-@*return* — Formatted time string (e.g., "42ns", "1.5ms").
+@_return_ — Formatted time string (e.g., "42ns", "1.5ms").
 
 ### humanize_memory
 
@@ -401,9 +403,9 @@ function luamark.humanize_memory(kb: number) -> string
 Format a memory value to a human-readable string.
 Selects the best unit automatically (TB, GB, MB, kB, B).
 
-@*param* `kb` — Memory in kilobytes.
+@_param_ `kb` — Memory in kilobytes.
 
-@*return* — Formatted memory string (e.g., "512kB", "1.5MB").
+@_return_ — Formatted memory string (e.g., "512kB", "1.5MB").
 
 ### humanize_count
 
@@ -413,9 +415,9 @@ function luamark.humanize_count(n: number) -> string
 
 Format a count to a human-readable string with SI suffix (M, k).
 
-@*param* `n` — Count value.
+@_param_ `n` — Count value.
 
-@*return* — Formatted count string (e.g., "1k", "12.5M").
+@_return_ — Formatted count string (e.g., "1k", "12.5M").
 
 ### unload
 
@@ -426,9 +428,9 @@ function luamark.unload(pattern: string) -> integer
 Unload modules matching a Lua pattern from `package.loaded`.
 Useful for benchmarking module load times or resetting state between runs.
 
-@*param* `pattern` — Lua pattern to match module names against.
+@_param_ `pattern` — Lua pattern to match module names against.
 
-@*return* — Number of modules unloaded.
+@_return_ — Number of modules unloaded.
 
 ```lua
 -- Unload all modules starting with "mylib"
