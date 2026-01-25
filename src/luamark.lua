@@ -18,30 +18,30 @@ local table_sort = table.sort
 -- ----------------------------------------------------------------------------
 
 -- Config defaults balance accuracy vs runtime across function speeds:
--- (config.time=5s, config.rounds=100, MAX_ROUNDS=1000, RESAMPLES=10000)
+-- (config.time=1s, config.rounds=100, MAX_ROUNDS=100, RESAMPLES=5000)
 --
--- | Function    | Duration | Rounds | Iterations | Bootstrap | Total  |
--- |-------------|----------|--------|------------|-----------|--------|
--- | Very fast   | ~1μs     | 1,000  | 1,000+     | ~100ms    | ~100ms |
--- | Fast        | ~100μs   | 1,000  | 1          | ~100ms    | ~200ms |
--- | Medium      | ~10ms    | 500    | 1          | ~50ms     | ~5s    |
--- | Slow        | ~500ms   | 100    | 1          | ~10ms     | ~50s   |
+-- | Function    | Duration | Rounds | Iterations | Bootstrap | Total |
+-- |-------------|----------|--------|------------|-----------|-------|
+-- | Very fast   | ~1μs     | 100    | 1,000+     | ~5ms      | ~10ms |
+-- | Fast        | ~100μs   | 100    | 1          | ~5ms      | ~15ms |
+-- | Medium      | ~10ms    | 100    | 1          | ~5ms      | ~1s   |
+-- | Slow        | ~500ms   | 100    | 1          | ~5ms      | ~50s  |
 --
--- MAX_ROUNDS caps fast functions to prevent excessive bootstrap overhead.
--- BOOTSTRAP_RESAMPLES (10k) provides accurate 95% CI for median.
+-- MAX_ROUNDS caps fast functions to ensure consistent sample count.
+-- BOOTSTRAP_RESAMPLES (5k) provides accurate 95% CI for median.
 
-local BOOTSTRAP_RESAMPLES = 10000
+local BOOTSTRAP_RESAMPLES = 5000
 local CALIBRATION_PRECISION = 5
 local DEFAULT_TERM_WIDTH = 100
 local MEMORY_PRECISION = 4
 local BYTES_TO_KB = 1024
 local MAX_CALIBRATION_ATTEMPTS = 10
 local MAX_ITERATIONS = 1e6
-local MAX_ROUNDS = 1000
+local MAX_ROUNDS = 100
 
 local config = {
    rounds = 100,
-   time = 5,
+   time = 1,
 }
 
 ---@generic K, V

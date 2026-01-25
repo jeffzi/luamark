@@ -6,12 +6,12 @@ Set global configuration options directly on the module:
 
 ```lua
 luamark.rounds = 100  -- Target sample count
-luamark.time = 5      -- Target duration in seconds
+luamark.time = 1      -- Target duration in seconds
 ```
 
 Benchmarks run until **either** target is met: `rounds` samples collected
-or `time` seconds elapsed. For very fast functions, rounds are capped at 1,000
-to prevent excessive runtime.
+or `time` seconds elapsed. For very fast functions, rounds are capped at 100
+to ensure consistent sample count.
 
 ### clock_name
 

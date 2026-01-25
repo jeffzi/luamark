@@ -140,11 +140,11 @@ an `≈` prefix (e.g., `≈1 ≈1 3`), indicating they are statistically indisti
 LuaMark provides two configuration options:
 
 - `rounds`: Target sample count (default: 100)
-- `time`: Target duration in seconds (default: 5)
+- `time`: Target duration in seconds (default: 1)
 
 Benchmarks run until **either** target is met: `rounds` samples collected
-or `time` seconds elapsed. For very fast functions, rounds are capped at 1,000
-to prevent excessive runtime.
+or `time` seconds elapsed. For very fast functions, rounds are capped at 100
+to ensure consistent sample count.
 
 Modify these settings directly:
 
