@@ -1297,6 +1297,12 @@ end
 -- ----------------------------------------------------------------------------
 
 --- Render benchmark results as a formatted string.
+---
+--- NOTE: Results should be homogeneous (same unit). Mixing time (unit="s") and
+--- memory (unit="kb") results produces undefined ordering. Call render()
+--- separately for each benchmark type when combining compare_time() and
+--- compare_memory() results.
+---
 ---@param results luamark.Result[] Benchmark results (flat array from compare_time/compare_memory).
 ---@param short? boolean If true, show bar chart only; if false/nil, show full table.
 ---@param max_width? integer Maximum output width (default: terminal width).
