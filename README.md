@@ -14,6 +14,7 @@ execution time and memory usage with sensible defaults and optional high-precisi
 - **Measure time and memory** with optional precision via [Chronos][chronos],
   [LuaPosix][luaposix], [LuaSocket][luasocket], or [AllocSpy][allocspy]
 - **Statistics**: median with 95% confidence intervals
+- **Standalone Timer**: `luamark.Timer()` for ad-hoc profiling outside benchmarks
 - **Ready to use** with sensible defaults
 
 [chronos]: https://github.com/ldrumm/chronos
@@ -41,12 +42,12 @@ Alternatively, you can manually include [luamark.lua](src/luamark.lua) in your p
 
 ### API Overview
 
-| Function              | Input              | Returns               | `params` |
-| --------------------- | ------------------ | --------------------- | -------- |
-| [`timeit`][1]         | single function    | [`Stats`][5]          | No       |
-| [`memit`][2]          | single function    | [`Stats`][5]          | No       |
-| [`compare_time`][3]   | table of functions | [`Result[]`][6]       | Yes      |
-| [`compare_memory`][4] | table of functions | [`Result[]`][6]       | Yes      |
+| Function              | Input              | Returns         | `params` |
+| --------------------- | ------------------ | --------------- | -------- |
+| [`timeit`][1]         | single function    | [`Stats`][5]    | No       |
+| [`memit`][2]          | single function    | [`Stats`][5]    | No       |
+| [`compare_time`][3]   | table of functions | [`Result[]`][6] | Yes      |
+| [`compare_memory`][4] | table of functions | [`Result[]`][6] | Yes      |
 
 [1]: docs/api.md#timeit
 [2]: docs/api.md#memit
@@ -95,11 +96,11 @@ print(stats)
 local luamark = require("luamark")
 
 local results = luamark.compare_time({
-   loop = function(ctx, p)
+   loop = function(ctx)
       local s = ""
       for i = 1, #ctx.data do s = s .. ctx.data[i] end
    end,
-   table_concat = function(ctx, p)
+   table_concat = function(ctx)
       table.concat(ctx.data)
    end,
 }, {
@@ -118,20 +119,53 @@ print(luamark.render(results))  -- detailed output (full table)
 
 ```text
 n=100
-    Name      Rank      Ratio       Median  CI Low  CI High    Ops      Iters
-------------  ----  --------------  ------  ------  -------  --------  --------
-table_concat  1     █        1.00x  1.12us  1.12us  1.12us   888.9k/s  1000 × 1
-loop          2     ████████ 4.18x  4.71us  4.67us  4.79us   212.4k/s  1000 × 1
+    Name      Rank      Ratio       Median  CI Low  CI High    Ops     Rounds
+------------  ----  --------------  ------  ------  -------  --------  ------
+table_concat  1     █        1.00x  1.12us  1.12us  1.12us   888.9k/s    1000
+loop          2     ████████ 4.18x  4.71us  4.67us  4.79us   212.4k/s    1000
 
 n=1000
-    Name      Rank       Ratio        Median    CI Low   CI High     Ops     Iters
-------------  ----  ---------------  --------  --------  --------  -------  --------
-table_concat  1     █         1.00x  12.33us   12.29us   12.38us   81.1k/s  1000 × 1
-loop          2     ████████ 15.47x  190.83us  189.46us  192.38us  5.2k/s   1000 × 1
+    Name      Rank       Ratio        Median    CI Low   CI High     Ops    Rounds
+------------  ----  ---------------  --------  --------  --------  -------  ------
+table_concat  1     █         1.00x  12.33us   12.29us   12.38us   81.1k/s    1000
+loop          2     ████████ 15.47x  190.83us  189.46us  192.38us  5.2k/s     1000
 ```
 
 When results have overlapping confidence intervals, they share the same rank with
 an `≈` prefix (e.g., `≈1 ≈1 3`), indicating they are statistically indistinguishable.
+
+### Timer API
+
+Control exactly what gets measured using `timer.start()` and `timer.stop()`:
+
+```lua
+local luamark = require("luamark")
+
+local results = luamark.compare_time({
+   table_sort = function(ctx, timer)
+      -- Copy array (not timed)
+      local copy = {}
+      for i = 1, #ctx do
+         copy[i] = ctx[i]
+      end
+
+      -- Only time the sort
+      timer.start()
+      table.sort(copy)
+      timer.stop()
+   end,
+}, {
+   setup = function()
+      local ctx = {}
+      for i = 1, 1000 do
+         ctx[i] = math.random(10000)
+      end
+      return ctx
+   end,
+})
+```
+
+If you don't use the timer, the entire function is measured (auto-timing).
 
 ## Technical Details
 

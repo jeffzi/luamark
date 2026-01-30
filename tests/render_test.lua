@@ -34,12 +34,12 @@ describe("render", function()
       assert.matches("CI Low", output)
       assert.matches("CI High", output)
       assert.matches("Ops", output)
-      assert.matches("Iters", output)
+      assert.matches("Rounds", output)
 
       -- Values and bar chart
       assert.matches("fast.*1%.00x", output)
       assert.matches("slow.*3%.00x", output)
-      assert.matches("10 × 1k", output)
+      assert.matches("%d+", output)
       assert.matches("1k/s", output)
    end)
 
@@ -132,5 +132,49 @@ describe("render", function()
       local short_output = luamark.render(results, true)
       assert.matches("n=10", short_output)
       assert.matches("n=20", short_output)
+   end)
+
+   test("renders single time Stats as key-value format", function()
+      local stats = h.make_stats(250e-9) -- 250ns
+      local output = luamark.render(stats)
+
+      assert.matches("Median: 250ns", output)
+      assert.matches("CI:", output)
+      assert.matches("Ops:", output)
+      assert.matches("Rounds: 100", output)
+      assert.matches("Total:", output)
+   end)
+
+   test("renders single memory Stats without ops", function()
+      local stats = h.make_stats(1.5, { unit = "kb" }) -- 1.5 kB
+      local output = luamark.render(stats)
+
+      assert.matches("Median: 1%.5kB", output)
+      assert.matches("CI:", output)
+      assert.not_matches("Ops:", output)
+      assert.matches("Rounds:", output)
+      assert.matches("Total:", output)
+   end)
+
+   test("single Stats ignores short and max_width arguments", function()
+      local stats = h.make_stats(1e-6) -- 1us
+      local output_default = luamark.render(stats)
+      local output_short = luamark.render(stats, true)
+      local output_width = luamark.render(stats, false, 40)
+
+      -- All should produce the same key-value format
+      assert.are_equal(output_default, output_short)
+      assert.are_equal(output_default, output_width)
+   end)
+
+   test("renders real timeit Stats", function()
+      local stats = luamark.timeit(h.noop, { rounds = 10 })
+      local output = luamark.render(stats)
+
+      assert.matches("Median:", output)
+      assert.matches("CI:", output)
+      assert.matches("Ops:", output)
+      assert.matches("Rounds: 10", output)
+      assert.matches("Total:", output)
    end)
 end)

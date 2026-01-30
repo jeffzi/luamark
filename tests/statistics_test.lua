@@ -103,7 +103,6 @@ describe("bootstrap_ci", function()
    end)
 
    test("CI width decreases with more samples", function()
-      math.randomseed(12345)
       local small_samples = {}
       local large_samples = {}
       for i = 1, 10 do
@@ -144,13 +143,10 @@ describe("rank_results", function()
       }
    end
 
-   --- Extract rank strings from results (sorted by median).
+   --- Extract rank strings from results (assumes results are sorted by median).
    ---@param results table[]
    ---@return string[]
    local function get_rank_strings(results)
-      table.sort(results, function(a, b)
-         return a.median < b.median
-      end)
       local ranks = {}
       for i = 1, #results do
          local r = results[i]

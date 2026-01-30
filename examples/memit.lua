@@ -21,21 +21,18 @@ local stats = luamark.memit(function()
    allocate_strings(1000)
 end, { rounds = 100 })
 
--- Stats has a readable __tostring
+-- Stats has a readable __tostring (compact format)
 print(stats)
 -- Example output: 138.19kB ± 0B
 
--- Access individual stats fields (values are in kilobytes)
-print(string.format("Median: %s", luamark.humanize_memory(stats.median)))
-print(
-   string.format(
-      "95%% CI: [%s, %s]",
-      luamark.humanize_memory(stats.ci_lower),
-      luamark.humanize_memory(stats.ci_upper)
-   )
-)
-print(string.format("Rounds: %d", stats.rounds))
-print(string.format("Iterations per round: %d", stats.iterations))
+-- Use render() for detailed key-value format
+print("\n=== Detailed output with render() ===")
+print(luamark.render(stats))
+-- Example output:
+-- Median: 138.19kB
+-- CI: 138.19kB - 138.19kB (± 0B)
+-- Rounds: 100
+-- Total: 13.5MB
 
 -- ============================================================================
 -- Example 2: memit with setup/teardown
@@ -45,21 +42,55 @@ print(string.format("Iterations per round: %d", stats.iterations))
 print("\n=== memit with setup/teardown ===")
 local stats_with_setup = luamark.memit(function(ctx)
    local result = ""
-   for i = 1, #ctx.strings do
-      result = result .. ctx.strings[i]
+   for i = 1, #ctx do
+      result = result .. ctx[i]
    end
 end, {
    setup = function()
-      -- setup receives no arguments
+      -- setup receives no arguments, returns ctx for benchmark function
       local strings = {}
       for i = 1, 100 do
          strings[i] = tostring(i)
       end
-      return { strings = strings } -- returned value becomes ctx in benchmark function
+      return strings
    end,
    teardown = function(ctx)
       -- teardown receives only ctx in memit API
-      print(string.format("Concatenated %d strings", #ctx.strings))
+      print(string.format("Concatenated %d strings", #ctx))
    end,
 })
 print(stats_with_setup)
+
+-- ============================================================================
+-- Example 3: Comparing allocation strategies
+-- ============================================================================
+-- Use compare_memory to compare different implementations
+
+print("\n=== Comparing allocation strategies ===")
+local results = luamark.compare_memory({
+   -- String concatenation creates many intermediate strings
+   string_concat = function()
+      local s = ""
+      for i = 1, 100 do
+         s = s .. tostring(i)
+      end
+   end,
+   -- table.concat is more memory efficient
+   table_concat = function()
+      local t = {}
+      for i = 1, 100 do
+         t[i] = tostring(i)
+      end
+      local _ = table.concat(t)
+   end,
+   preallocated = function()
+      local t = { nil, nil, nil, nil, nil, nil, nil, nil, nil, nil } -- hint size
+      for i = 1, 100 do
+         t[i] = tostring(i)
+      end
+      local _ = table.concat(t)
+   end,
+}, { rounds = 100 })
+
+print(results)
+print(luamark.render(results))

@@ -50,6 +50,17 @@ describe("simple API (timeit/memit)", function()
 
       assert.matches("±", str)
    end)
+
+   test("function receives timer as second argument", function()
+      local received_timer
+      luamark.timeit(function(ctx, timer)
+         received_timer = timer
+      end, { rounds = 1 })
+
+      assert.is_not_nil(received_timer)
+      assert.is_function(received_timer.start)
+      assert.is_function(received_timer.stop)
+   end)
 end)
 
 describe("suite API (compare_time/compare_memory)", function()
@@ -62,8 +73,8 @@ describe("suite API (compare_time/compare_memory)", function()
    test("params are passed to function and inlined in results", function()
       local seen_n = {}
       local results = luamark.compare_time({
-         test = function(ctx, p)
-            seen_n[p.n] = true
+         test = function(ctx, timer, params)
+            seen_n[params.n] = true
          end,
       }, {
          params = { n = { 10, 20 } },
@@ -81,8 +92,8 @@ describe("suite API (compare_time/compare_memory)", function()
    test("multiple params expand as cartesian product", function()
       local seen = {}
       luamark.compare_time({
-         test = function(ctx, p)
-            seen[p.n .. "_" .. tostring(p.flag)] = true
+         test = function(ctx, timer, params)
+            seen[params.n .. "_" .. tostring(params.flag)] = true
          end,
       }, {
          params = { n = { 1, 2 }, flag = { true, false } },
@@ -125,30 +136,18 @@ describe("suite API (compare_time/compare_memory)", function()
       assert.are_equal(4, #results)
    end)
 
-   test("bench functions can be plain functions or tables with fn", function()
-      local plain_called, table_called = false, false
-
-      luamark.compare_time({
-         plain = function()
-            plain_called = true
-         end,
-         with_setup = {
-            fn = function()
-               table_called = true
-            end,
-         },
-      }, { rounds = 1 })
-
-      assert.is_true(plain_called)
-      assert.is_true(table_called)
-   end)
-
    describe("funcs validation", function()
       for _, name in ipairs({ "compare_time", "compare_memory" }) do
          test(name .. " rejects array (numeric keys)", function()
             assert.has_error(function()
                luamark[name]({ h.noop, h.noop }, { rounds = 1 })
             end, "'funcs' keys must be strings, got number. Use named keys: { name = fn }")
+         end)
+
+         test(name .. " rejects non-function values", function()
+            assert.has_error(function()
+               luamark[name]({ test = "not a function" }, { rounds = 1 })
+            end, "funcs['test'] must be a function")
          end)
       end
    end)

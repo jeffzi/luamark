@@ -70,71 +70,73 @@ print(results2)
 
 print("\n=== Parameterized benchmarks ===")
 local results3 = luamark.compare_time({
-   -- benchmark functions receive (ctx, params)
-   -- ctx: returned by setup, params: current parameter combination
-   loop = function(ctx, params)
+   -- benchmark functions receive (ctx, timer, params)
+   -- ctx: returned by setup, timer. for manual timing, params: current parameter combination
+   loop = function(ctx) -- doesn't need timer or params
       local s = ""
-      for i = 1, params.n do
-         s = s .. ctx.data[i]
+      for i = 1, #ctx do
+         s = s .. ctx[i]
       end
    end,
-   table_concat = function(ctx) -- doesn't need params
-      local _ = table.concat(ctx.data)
+   table_concat = function(ctx) -- doesn't need timer or params
+      local _ = table.concat(ctx)
    end,
 }, {
    params = { n = { 10, 100, 1000 } },
    setup = function(params)
       -- setup receives params and returns ctx
-      local data = {}
+      local ctx = {}
       for i = 1, params.n do
-         data[i] = "x"
+         ctx[i] = "x"
       end
-      return { data = data } -- returned value becomes ctx in benchmark functions
+      return ctx -- returned value becomes ctx in benchmark functions
    end,
 })
 print(luamark.render(results3))
 
 -- ============================================================================
--- Example 4: Two-level setup (per-function before)
+-- Example 4: Multiple timed sections
 -- ============================================================================
--- setup: runs once per param combo (expensive work, consistent test data)
--- before: runs each iteration (cheap reset, e.g. copy data that gets mutated)
+-- timer.start() and timer.stop() can be called multiple times
+-- All timed sections are accumulated
 
-print("\n=== Two-level setup (sorting benchmark) ===")
+print("\n=== Multiple timed sections ===")
 local results4 = luamark.compare_time({
-   table_sort = {
-      fn = function(ctx)
-         table.sort(ctx.copy) -- sort mutates the array
-      end,
-      -- before receives ctx from setup, returns ctx for fn
-      before = function(ctx)
-         -- copy the source array so each iteration has fresh unsorted data
-         local copy = {}
-         for i = 1, #ctx.source do
-            copy[i] = ctx.source[i]
-         end
-         ctx.copy = copy
-         return ctx
-      end,
-   },
+   copy_and_sort = function(ctx, timer)
+      -- First timed section: copy the array
+      timer.start()
+      local copy = {}
+      for i = 1, #ctx do
+         copy[i] = ctx[i]
+      end
+      timer.stop()
+
+      -- Untimed: verify copy succeeded
+      assert(#copy == #ctx)
+
+      -- Second timed section: sort
+      timer.start()
+      table.sort(copy)
+      timer.stop()
+   end,
 }, {
    params = { n = { 100, 1000 } },
    setup = function(params)
-      -- generate random data once (expensive, ensures fair comparison)
-      local source = {}
+      local data = {}
       for i = 1, params.n do
-         source[i] = math.random(params.n * 10)
+         data[i] = math.random(params.n * 10)
       end
-      return { source = source }
+      return data
    end,
    rounds = 50,
 })
-print(luamark.render(results4, true))
+print(luamark.render(results4))
 
 -- ============================================================================
 -- Example 5: Realistic algorithm comparison
 -- ============================================================================
 -- Linear vs binary search with multiple params (n × sorted)
+-- Note: binary search requires sorted data; results are wrong when sorted=false
 
 local function linear_search(arr, target)
    for i = 1, #arr do

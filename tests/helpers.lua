@@ -15,8 +15,8 @@ require_or_fail("chronos")
 require_or_fail("allocspy")
 local posix_time = require_or_fail("posix.time")
 
-local CLOCKS = posix_time.clock_gettime and { "chronos", "posix.time" } or { "chronos" }
 local ALL_CLOCKS = { "chronos", "posix.time", "socket" }
+local CLOCKS = posix_time.clock_gettime and ALL_CLOCKS or { "chronos", "socket" }
 
 --- Return all clocks except the specified one.
 ---@param clock_name string Clock to keep.
@@ -104,6 +104,34 @@ local function make_result_row(name, median, rank_value, ratio_value, opts)
    return row
 end
 
+--- Create a mock Stats object (from timeit/memit).
+---@param median number
+---@param opts? {unit?: "s"|"kb", rounds?: integer, total?: number}
+---@return table
+local function make_stats(median, opts)
+   opts = opts or {}
+   local unit = opts.unit or "s"
+   local rounds = opts.rounds or 100
+   local ci_lower = median * 0.99
+   local ci_upper = median * 1.01
+   local stats = {
+      median = median,
+      ci_lower = ci_lower,
+      ci_upper = ci_upper,
+      ci_margin = (ci_upper - ci_lower) / 2,
+      rounds = rounds,
+      iterations = 1000,
+      total = opts.total or (median * rounds),
+      unit = unit,
+      timestamp = "2025-01-01 00:00:00Z",
+      samples = {},
+   }
+   if unit == "s" and median > 0 then
+      stats.ops = 1 / median
+   end
+   return stats
+end
+
 return {
    ALL_CLOCKS = ALL_CLOCKS,
    CLOCKS = CLOCKS,
@@ -111,5 +139,6 @@ return {
    clocks_except = clocks_except,
    load_luamark = load_luamark,
    make_result_row = make_result_row,
+   make_stats = make_stats,
    noop = noop,
 }

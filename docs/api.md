@@ -1,26 +1,5 @@
 # luamark
 
-## Configuration
-
-Set global configuration options directly on the module:
-
-```lua
-luamark.rounds = 100  -- Target sample count
-luamark.time = 1      -- Target duration in seconds
-```
-
-Benchmarks run until **either** target is met: `rounds` samples collected
-or `time` seconds elapsed. For very fast functions, rounds are capped at 100
-to ensure consistent sample count.
-
-### clock_name
-
-```lua
-luamark.clock_name  -- "chronos" | "posix.time" | "socket" | "os.clock"
-```
-
-Read-only string indicating which clock module is in use.
-
 ## API Overview
 
 luamark provides two APIs:
@@ -41,10 +20,10 @@ Use [`timeit`](#timeit) and [`memit`](#memit) to benchmark a single function.
 ### timeit
 
 ```lua
-function luamark.timeit(fn: fun(ctx?: any), opts?: Options) -> Stats
+function luamark.timeit(fn: fun(ctx?, timer?), opts?: Options) -> Stats
 ```
 
-Benchmark a single function for execution time. Returns time in seconds.
+Benchmark a single function for execution time. Time is measured in seconds.
 
 ```lua
 local stats = luamark.timeit(function()
@@ -58,10 +37,10 @@ print(stats.median, stats.ci_margin)  -- Access individual fields
 ### memit
 
 ```lua
-function luamark.memit(fn: fun(ctx?: any), opts?: Options) -> Stats
+function luamark.memit(fn: fun(ctx?, timer?), opts?: Options) -> Stats
 ```
 
-Benchmark a single function for memory usage. Returns memory in kilobytes.
+Benchmark a single function for memory usage. Memory is measured in kilobytes.
 
 ```lua
 local stats = luamark.memit(function()
@@ -72,6 +51,43 @@ end, { rounds = 10 })
 print(stats)  -- "16.05kB ± 0B"
 ```
 
+### Stats
+
+Returned by [`timeit`](#timeit) and [`memit`](#memit).
+
+```lua
+local stats = luamark.timeit(fn, { rounds = 10 })
+print(stats)  -- "250ns ± 0ns"
+```
+
+| Field      | Type      | Description                                            |
+| ---------- | --------- | ------------------------------------------------------ |
+| median     | number    | Median value of samples                                |
+| ci_lower   | number    | Lower bound of 95% CI for median                       |
+| ci_upper   | number    | Upper bound of 95% CI for median                       |
+| ci_margin  | number    | Half-width of CI ((upper - lower) / 2)                 |
+| total      | number    | Sum of all samples                                     |
+| samples    | number[]  | Raw samples (sorted)                                   |
+| rounds     | integer   | Number of rounds (samples) collected                   |
+| iterations | integer   | Number of iterations per round                         |
+| timestamp  | string    | ISO 8601 UTC timestamp of benchmark start              |
+| unit       | "s"\|"kb" | Measurement unit (seconds or kilobytes)                |
+| ops        | number?   | Operations per second (1/median, time benchmarks only) |
+
+**Output format:** The `__tostring` metamethod outputs a compact format showing only
+`median ± ci_margin`. To access additional fields like `ops`, `rounds`, `iterations`,
+or the full confidence interval bounds (`ci_lower`/`ci_upper`), read them directly
+from the stats object:
+
+```lua
+local stats = luamark.timeit(fn)
+print(stats)              -- "250ns ± 0ns" (compact)
+print(stats.ops)          -- 4000000 (operations per second)
+print(stats.rounds)       -- 100
+print(stats.iterations)   -- 1000
+print(stats.ci_lower, stats.ci_upper)  -- full CI bounds
+```
+
 ### Options
 
 ```lua
@@ -80,13 +96,22 @@ print(stats)  -- "16.05kB ± 0B"
 ---@field time? number Target duration in seconds.
 ---@field setup? fun(): any Function executed once before benchmark; returns context.
 ---@field teardown? fun(ctx?: any) Function executed once after benchmark.
----@field before? fun(ctx?: any): any Function executed before each iteration.
----@field after? fun(ctx?: any) Function executed after each iteration.
+```
+
+**Execution order:**
+
+```text
+setup() → ctx
+│
+├─ Iteration 1: fn(ctx, timer)
+├─ Iteration 2: fn(ctx, timer)
+├─ ...
+│
+teardown(ctx)
 ```
 
 **Note:** The [`params`](#params) option is NOT supported in [`Options`](#options).
 Use [`compare_time`](#compare_time)/[`compare_memory`](#compare_memory) for parameterized benchmarks.
-In single mode, hooks receive only `ctx`, not params.
 
 ---
 
@@ -99,7 +124,7 @@ multiple functions, optionally with parameterized benchmarks.
 
 ```lua
 function luamark.compare_time(
-   funcs: table<string, fun(ctx, p)|Spec>,
+   funcs: table<string, fun(ctx?, timer?, params?)>,
    opts?: SuiteOptions
 ) -> Result[]
 ```
@@ -110,11 +135,11 @@ Compare multiple functions for execution time. Returns ranked results.
 
 ```lua
 local results = luamark.compare_time({
-   concat_loop = function(ctx, p)
+   concat_loop = function(ctx, timer, p)
       local s = ""
       for i = 1, p.n do s = s .. i end
    end,
-   table_concat = function(ctx, p)
+   table_concat = function(ctx, timer, p)
       local t = {}
       for i = 1, p.n do t[i] = i end
       return table.concat(t)
@@ -130,7 +155,7 @@ print(results)  -- Prints formatted comparison table
 
 ```lua
 function luamark.compare_memory(
-   funcs: table<string, fun(ctx, p)|Spec>,
+   funcs: table<string, fun(ctx?, timer?, params?)>,
    opts?: SuiteOptions
 ) -> Result[]
 ```
@@ -147,28 +172,52 @@ Compare multiple functions for memory usage. Returns ranked results.
 ---@field time? number Target duration in seconds.
 ---@field setup? fun(p: table): any Function executed once; receives params, returns context.
 ---@field teardown? fun(ctx: any, p: table) Function executed once after benchmark.
----@field before? fun(ctx: any, p: table): any Function executed before each iteration.
----@field after? fun(ctx: any, p: table) Function executed after each iteration.
 ---@field params? table<string, ParamValue[]> Parameter combinations to benchmark across.
 ```
 
-**Note:** In suite mode, all hooks receive the params table:
+**Execution order** (same as Single API, with `params` passed to each function):
+
+```text
+setup(params) → ctx
+│
+├─ Iteration 1: fn(ctx, timer, params)
+├─ Iteration 2: fn(ctx, timer, params)
+├─ ...
+│
+teardown(ctx, params)
+```
+
+| Hook       | Runs                 | Use Case                      |
+| ---------- | -------------------- | ----------------------------- |
+| `setup`    | Once per param combo | Load config, create test data |
+| `teardown` | Once per param combo | Close connections, cleanup    |
+
+For per-iteration work (like copying data that gets mutated), use the
+[Timer](#timer) to exclude it from timing:
 
 ```lua
-luamark.compare_time({ test = test_fn }, {
-   params = { n = { 100, 1000 } },
+luamark.compare_time({
+   table_sort = function(ctx, timer)
+      -- Per-iteration setup (not timed)
+      local copy = {}
+      for i = 1, #ctx.source do
+         copy[i] = ctx.source[i]
+      end
+
+      -- Only time the sort
+      timer.start()
+      table.sort(copy)
+      timer.stop()
+   end,
+}, {
+   params = { n = {100, 1000} },
    setup = function(p)
-      return { data = generate_data(p.n) }
-   end,
-   teardown = function(ctx, p)
-      cleanup(p.n)
-   end,
-   before = function(ctx, p)
-      ctx.fresh = generate_fresh(p.n)
-      return ctx
-   end,
-   after = function(ctx, p)
-      -- ...
+      -- Run once per param combo
+      local source = {}
+      for i = 1, p.n do
+         source[i] = math.random(p.n * 10)
+      end
+      return { source = source }
    end,
 })
 ```
@@ -193,20 +242,6 @@ luamark.compare_time(funcs, {
 -- Runs benchmark for all 6 combinations (3 sizes × 2 types)
 ```
 
-### Spec
-
-When passing multiple functions to [`compare_time`](#compare_time)/[`compare_memory`](#compare_memory),
-each function can optionally be a Spec table with per-iteration setup/teardown.
-Unlike [`SuiteOptions`](#suiteoptions).setup/teardown (run once per benchmark),
-[`Spec`](#spec).before/after run before/after each iteration.
-
-```lua
----@class Spec
----@field fn fun(ctx: any, p: table) Benchmark function.
----@field before? fun(ctx: any, p: table): any Per-iteration setup.
----@field after? fun(ctx: any, p: table) Per-iteration teardown.
-```
-
 ### Result
 
 [`compare_time`](#compare_time) and [`compare_memory`](#compare_memory) return
@@ -217,9 +252,10 @@ The array has a `__tostring` metamethod that calls
 ```lua
 local results = luamark.compare_time({ a = fn_a, b = fn_b })
 print(results)  -- Prints bar chart (short format)
+print(luamark.render(results))  -- Prints full table with all stats
 ```
 
-**Sorting:** Results are sorted by parameter group (alphabetically), then by rank
+**Sorting:** Results are grouped by parameter combination, then sorted by rank
 within each group (fastest first). This means you can iterate over results in
 display order without additional sorting.
 
@@ -252,102 +288,126 @@ print(result.n)        -- 100 (param field, if params = {n = {100}} was used)
 | is_approximate | boolean?  | True if rank is tied due to CI overlap                   |
 | _param_name_   | any       | Any param values are inlined directly (e.g., `result.n`) |
 
----
-
-## Lifecycle Hooks
-
-### Execution Order
-
-```text
-setup(params) → ctx
-│
-├─ Iteration 1:
-│   Options.before(ctx, params) → iteration_ctx
-│   Spec.before(iteration_ctx, params) → iteration_ctx
-│   fn(iteration_ctx, params)
-│   Spec.after(iteration_ctx, params)
-│   Options.after(iteration_ctx, params)
-│
-├─ Iteration 2: ...
-│
-teardown(ctx, params)
-```
-
-**Note:** In single API ([`timeit`](#timeit)/[`memit`](#memit)), hooks receive no
-[`params`](#params) argument.
-
-### When to Use Each Hook
-
-| Hook               | Scope        | Runs                 | Use Case                      |
-| ------------------ | ------------ | -------------------- | ----------------------------- |
-| `Options.setup`    | Shared       | Once per param combo | Load config, open DB          |
-| `Options.teardown` | Shared       | Once per param combo | Close connections, cleanup    |
-| `Options.before`   | Shared       | Every iteration      | Generate fresh test data      |
-| `Options.after`    | Shared       | Every iteration      | Shared cleanup after each run |
-| `Spec.before`      | Per-function | Every iteration      | Function-specific setup       |
-| `Spec.after`       | Per-function | Every iteration      | Function-specific cleanup     |
-
-### Example
-
-```lua
--- Options.before: shared data for all functions
--- Spec.before: per-function initialization
-luamark.compare_time({
-   algorithm_a = {
-      fn = algorithm_a,
-      before = function(ctx, p)
-         ctx.state = initialize_a(ctx.data)
-         return ctx
-      end,
-   },
-   algorithm_b = {
-      fn = algorithm_b,
-      before = function(ctx, p)
-         ctx.state = initialize_b(ctx.data)
-         return ctx
-      end,
-   },
-}, {
-   params = { n = {100, 1000} },
-   before = function(ctx, p)
-      ctx.data = generate_data(p.n)
-      return ctx
-   end,
-})
-```
-
----
-
-## Stats
-
-Returned by all benchmark functions. Has a `__tostring` metamethod for readable output:
-
-```lua
-local stats = luamark.timeit(fn, { rounds = 10 })
-print(stats)  -- "250ns ± 0ns"
-```
-
-| Field          | Type      | Description                                               |
-| -------------- | --------- | --------------------------------------------------------- |
-| median         | number    | Median value of samples                                   |
-| ci_lower       | number    | Lower bound of 95% CI for median                          |
-| ci_upper       | number    | Upper bound of 95% CI for median                          |
-| ci_margin      | number    | Half-width of CI ((upper - lower) / 2)                    |
-| total          | number    | Sum of all samples                                        |
-| samples        | number[]  | Raw samples (sorted)                                      |
-| rounds         | integer   | Number of rounds (samples) collected                      |
-| iterations     | integer   | Number of iterations per round                            |
-| timestamp      | string    | ISO 8601 UTC timestamp of benchmark start                 |
-| unit           | "s"\|"kb" | Measurement unit (seconds or kilobytes)                   |
-| ops            | number?   | Operations per second (1/median, time benchmarks only)    |
-| rank           | integer?  | Rank accounting for CI overlap (`compare_*` only)         |
-| ratio          | number?   | Ratio to fastest (`compare_*` only)                       |
-| is_approximate | boolean?  | True if rank is tied due to CI overlap (`compare_*` only) |
-
 **Rank display:** When results have overlapping confidence intervals, they share the
 same rank with an `≈` prefix. For example, `≈1 ≈1 3` means the first two results have
 overlapping CIs (statistically indistinguishable), while the third is clearly slower.
 The gap in rank numbers (1 to 3) indicates skipped positions.
+
+---
+
+## Timer
+
+The timer object controls what portion of your function is measured.
+
+### Auto-timing (default)
+
+If you don't call `timer.start()` and `timer.stop()`, the entire function is timed:
+
+```lua
+luamark.timeit(function(ctx)
+   work(ctx)  -- entire function is measured
+end)
+```
+
+### Manual timing
+
+Call `timer.start()` and `timer.stop()` to control exactly what gets measured:
+
+```lua
+luamark.timeit(function(ctx, timer)
+   local copy = copy_array(ctx.source)  -- not timed
+   timer.start()
+   table.sort(copy)                     -- only this is timed
+   timer.stop()
+   validate(copy)                       -- not timed
+end)
+```
+
+### Accumulating multiple sections
+
+Multiple `start()`/`stop()` pairs accumulate:
+
+```lua
+luamark.timeit(function(ctx, timer)
+   timer.start()
+   phase1()
+   timer.stop()
+
+   untimed_work()
+
+   timer.start()
+   phase2()
+   timer.stop()
+   -- Total time = phase1 + phase2
+end)
+```
+
+### Standalone Timer
+
+The `Timer` constructor creates a timer for ad-hoc manual profiling outside of benchmarks.
+It uses the same high-precision clock as the benchmark functions.
+
+```lua
+function luamark.Timer() -> luamark.Timer
+```
+
+Create a new timer instance:
+
+```lua
+local timer = luamark.Timer()
+timer.start()
+-- ... code to measure ...
+local elapsed = timer.stop()  -- elapsed time in seconds
+print(luamark.humanize_time(elapsed))  -- "42ms"
+```
+
+#### timer.start()
+
+```lua
+function timer.start()
+```
+
+Start timing. Errors if the timer is already running.
+
+#### timer.stop()
+
+```lua
+function timer.stop() -> number
+```
+
+Stop timing and return elapsed time in seconds since `start()` was called.
+Errors if the timer is not running.
+
+#### timer.elapsed()
+
+```lua
+function timer.elapsed() -> number
+```
+
+Get total accumulated time across all `start()`/`stop()` cycles.
+Errors if the timer is still running.
+
+#### timer.reset()
+
+```lua
+function timer.reset()
+```
+
+Reset timer for reuse. Clears accumulated time.
+
+#### Example
+
+```lua
+local luamark = require("luamark")
+
+-- Profile a specific operation
+local timer = luamark.Timer()
+timer.start()
+local result = expensive_operation()
+local elapsed = timer.stop()
+
+print(string.format("Operation took %s", luamark.humanize_time(elapsed)))
+```
 
 ---
 
@@ -357,7 +417,7 @@ The gap in rank numbers (1 to 3) indicates skipped positions.
 
 ```lua
 function luamark.render(
-   results: Result[],
+   input: Stats | Result[],
    short?: boolean,
    max_width?: integer
 ) -> string
@@ -365,17 +425,29 @@ function luamark.render(
 
 Render benchmark results as a formatted string.
 
-@_param_ `results` — Benchmark results ([`Result`](#result) array from [`compare_time`](#compare_time)/[`compare_memory`](#compare_memory)).
+Accepts either a single [`Stats`](#stats) object (from [`timeit`](#timeit)/[`memit`](#memit)) or an array of [`Result`](#result) objects (from [`compare_time`](#compare_time)/[`compare_memory`](#compare_memory)).
 
-@_param_ `short` — Output format.
+@_param_ `input` — Single [`Stats`](#stats) or [`Result`](#result) array.
+
+@_param_ `short` — Output format (ignored for single Stats).
 
 - `false` or `nil` (default): Full table with embedded bar chart in ratio column
 - `true`: Bar chart only (compact)
 
-@_param_ `max_width` — Maximum output width (default: terminal width).
+@_param_ `max_width` — Maximum output width (default: terminal width). Ignored for single Stats.
 
 ```lua
--- Full table (default)
+-- Single stats (detailed key-value format)
+local stats = luamark.timeit(fn)
+print(luamark.render(stats))
+-- Output:
+-- Median: 250ns
+-- CI: 248ns - 252ns (± 2ns)
+-- Ops: 4M/s
+-- Rounds: 100
+-- Total: 25us
+
+-- Results array (table format)
 print(luamark.render(results))
 
 -- Bar chart only
@@ -443,3 +515,26 @@ local stats = luamark.timeit(function()
    require("mymodule")
 end)
 ```
+
+---
+
+## Configuration
+
+Set global configuration options directly on the module:
+
+```lua
+luamark.rounds = 100  -- Target sample count
+luamark.time = 1      -- Target duration in seconds
+```
+
+Benchmarks run until **either** target is met: `rounds` samples collected
+or `time` seconds elapsed. For very fast functions, rounds are capped at 100
+to ensure consistent sample count.
+
+### clock_name
+
+```lua
+luamark.clock_name  -- "chronos" | "posix.time" | "socket" | "os.clock"
+```
+
+Read-only string indicating which clock module is in use.
