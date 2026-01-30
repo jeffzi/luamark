@@ -140,17 +140,16 @@ print(luamark.render(results))
 ```
 
 ```text
-n=100
-    Name      Rank      Ratio       Median  CI Low  CI High    Ops     Rounds
-------------  ----  --------------  ------  ------  -------  --------  ------
-table_concat  1     █        1.00x  1.04us  1.04us  1.04us   959.7k/s  100
-loop          2     ████████ 5.14x  5.35us  5.27us  5.5us    186.8k/s  100
+    Name      Rank      Factor       Median    Ops
+------------  ----  ---------------  ------  --------
+table_concat     1  █            1x     1us  959.7k/s
+loop             2  ████████ ↓5.12x     5us  187.5k/s
 
 n=1000
-    Name      Rank       Ratio        Median   CI Low   CI High     Ops    Rounds
-------------  ----  ---------------  --------  -------  --------  -------  ------
-table_concat  1     █         1.00x  10.17us   10.13us  10.17us   98.4k/s  100
-loop          2     ████████ 12.85x  130.62us  130us    132.77us  7.7k/s   100
+    Name      Rank       Factor         Median      Ops
+------------  ----  ----------------  -----------  ------
+table_concat     1  █             1x  10us ± 62ns   98k/s
+loop             2  ████████ ↓12.74x  130us ± 1us  7.7k/s
 ```
 
 When results have overlapping confidence intervals, they share the same rank with
@@ -187,7 +186,7 @@ local results = luamark.compare_time({
       return { source = source }
    end,
 })
-````
+```
 
 ### Standalone Timer
 

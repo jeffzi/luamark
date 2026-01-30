@@ -26,19 +26,19 @@ describe("render", function()
       }
       local output = luamark.render(results)
 
-      -- Headers
       assert.matches("Name", output)
       assert.matches("Rank", output)
-      assert.matches("Ratio", output)
+      assert.matches("Factor", output)
       assert.matches("Median", output)
-      assert.matches("CI Low", output)
-      assert.matches("CI High", output)
       assert.matches("Ops", output)
-      assert.matches("Rounds", output)
+      assert.not_matches("CI Low", output)
+      assert.not_matches("CI High", output)
+      assert.not_matches("Rounds", output)
+      assert.matches("±", output)
 
       -- Values and bar chart
-      assert.matches("fast.*1%.00x", output)
-      assert.matches("slow.*3%.00x", output)
+      assert.matches("fast.*1x", output)
+      assert.matches("slow.*↓3x", output)
       assert.matches("%d+", output)
       assert.matches("1k/s", output)
    end)
@@ -68,14 +68,16 @@ describe("render", function()
       assert.matches("%.%.%.", output)
    end)
 
-   test("ops column shows in time benchmarks, empty in memory", function()
+   test("ops column shows in time benchmarks, hidden in memory", function()
       local time_results = { h.make_result_row("fast", 0.001, 1, 1) }
       local mem_results = { h.make_result_row("test", 1.0, 1, 1, { unit = "kb" }) }
 
       local time_output = luamark.render(time_results)
+      assert.matches("Ops", time_output) -- Header present
       assert.matches("fast.*%d+[kMG]?/s", time_output)
 
       local mem_output = luamark.render(mem_results)
+      assert.not_matches("Ops", mem_output) -- Header hidden
       assert.not_matches("/s", mem_output)
    end)
 
@@ -97,16 +99,18 @@ describe("render", function()
 
       -- Memory: terabytes and sub-byte
       local tb, gb = 1024 ^ 3, 1024 ^ 2
-      assert.are_equal("1.5TB", luamark.humanize_memory(tb + 512 * gb))
+      assert.are_equal("2TB", luamark.humanize_memory(tb + 512 * gb))
       assert.are_equal("0B", luamark.humanize_memory(0.25 / 1024))
    end)
 
-   test("stats __tostring shows median ± margin format", function()
-      local stats = luamark.timeit(h.noop, { rounds = 10 })
-      local str = tostring(stats)
+   test("margin hidden when zero, shown when non-zero", function()
+      local zero_margin =
+         luamark.render({ h.make_result_row("a", 100e-9, 1, 1, { ci_margin = 0 }) })
+      assert.not_matches("±", zero_margin)
 
-      assert.matches("±", str)
-      assert.matches("[0-9%.]+[a-zA-Z]+ ± [0-9%.]+[a-zA-Z]+", str)
+      local with_margin =
+         luamark.render({ h.make_result_row("b", 100e-9, 1, 1, { ci_margin = 10e-9 }) })
+      assert.matches("100ns ± 10ns", with_margin)
    end)
 
    test("renders compare_time results", function()
@@ -114,7 +118,7 @@ describe("render", function()
       local output = luamark.render(results)
 
       assert.matches("test", output)
-      assert.matches("1%.00x", output)
+      assert.matches("1x", output)
    end)
 
    test("renders results with params in both formats", function()
@@ -146,10 +150,10 @@ describe("render", function()
    end)
 
    test("renders single memory Stats without ops", function()
-      local stats = h.make_stats(1.5, { unit = "kb" }) -- 1.5 kB
+      local stats = h.make_stats(2, { unit = "kb" }) -- 2 kB
       local output = luamark.render(stats)
 
-      assert.matches("Median: 1%.5kB", output)
+      assert.matches("Median: 2kB", output)
       assert.matches("CI:", output)
       assert.not_matches("Ops:", output)
       assert.matches("Rounds:", output)

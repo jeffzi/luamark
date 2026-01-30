@@ -231,14 +231,48 @@ describe("rank_results", function()
       assert.is_false(results[1].is_approximate)
    end)
 
-   test("ratio calculated from position ordering", function()
+   test("factor calculated from position ordering", function()
       local results = { make_row("a", 10, 9, 11), make_row("b", 30, 29, 31) }
       rank_results(results, {})
-      table.sort(results, function(x, y)
-         return x.median < y.median
-      end)
-      assert.are_equal(1, results[1].ratio)
-      assert.are_equal(3, results[2].ratio)
+      assert.are_equal(1, results[1].factor)
+      assert.are_equal(3, results[2].factor)
+   end)
+
+   test("baseline function is used for factor calculation", function()
+      local results = {
+         make_row("fast", 10, 9, 11),
+         make_row("baseline", 20, 19, 21),
+         make_row("slow", 40, 39, 41),
+      }
+      results[2].baseline = true
+      rank_results(results, {})
+      -- Ratios relative to baseline (median=20), not fastest (median=10)
+      assert.are_equal(0.5, results[1].factor) -- fast: 10/20 = 0.5
+      assert.are_equal(1, results[2].factor) -- baseline: 20/20 = 1
+      assert.are_equal(2, results[3].factor) -- slow: 40/20 = 2
+   end)
+
+   test("fallback to fastest when no baseline specified", function()
+      local results = {
+         make_row("fast", 10, 9, 11),
+         make_row("slow", 30, 29, 31),
+      }
+      rank_results(results, {})
+      -- Ratios relative to fastest (median=10)
+      assert.are_equal(1, results[1].factor)
+      assert.are_equal(3, results[2].factor)
+   end)
+
+   test("error when multiple baselines in same group", function()
+      local results = {
+         make_row("a", 10, 9, 11),
+         make_row("b", 20, 19, 21),
+      }
+      results[1].baseline = true
+      results[2].baseline = true
+      assert.has_error(function()
+         rank_results(results, {})
+      end, "multiple baselines in group: ")
    end)
 end)
 

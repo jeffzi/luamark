@@ -120,11 +120,11 @@ local results4 = luamark.compare_time({
 }, {
    params = { n = { 100, 1000 } },
    setup = function(params)
-      local data = {}
+      local source = {}
       for i = 1, params.n do
-         data[i] = math.random(params.n * 10)
+         source[i] = math.random(params.n * 10)
       end
-      return data
+      return { source = source }
    end,
    rounds = 50,
 })
@@ -162,10 +162,15 @@ end
 
 print("\n=== Linear vs Binary Search ===")
 print("Binary search is O(log n) but requires sorted data")
+print("Using baseline=true to make linear search the 1.00x reference point")
+print("Faster functions show ↑Nx (e.g., ↑48.0x = 48x faster than baseline)")
 local results5 = luamark.compare_time({
-   linear = function(ctx)
-      linear_search(ctx.data, ctx.target)
-   end,
+   linear = {
+      fn = function(ctx)
+         linear_search(ctx.data, ctx.target)
+      end,
+      baseline = true, -- Use linear search as reference point
+   },
    binary = function(ctx)
       binary_search(ctx.data, ctx.target)
    end,

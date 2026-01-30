@@ -210,26 +210,6 @@ local function bootstrap_ci(samples, n_resamples)
    return medians[lower_idx], medians[upper_idx]
 end
 
----@class luamark.BaseStats
----@field median number Median value of samples.
----@field ci_lower number Lower bound of 95% confidence interval for median.
----@field ci_upper number Upper bound of 95% confidence interval for median.
----@field ci_margin number Half-width of confidence interval ((upper - lower) / 2).
----@field total number Sum of all samples.
----@field samples number[] Raw samples (sorted).
----@field ratio? number Ratio relative to fastest benchmark.
----@field rank? integer Rank within benchmark group.
-
----@class luamark.Stats : luamark.BaseStats
----@field rounds integer Number of rounds executed (one sample per round).
----@field iterations integer Number of iterations per round.
----@field timestamp string ISO 8601 UTC timestamp of benchmark start.
----@field unit "s"|"kb" Measurement unit (seconds or kilobytes).
----@field ops? number Operations per second (1/median). Only present for time benchmarks.
----@field ratio? number Ratio relative to fastest benchmark.
----@field rank? integer Rank accounting for CI overlap (tied results share the same rank).
----@field is_approximate? boolean True if rank is approximate due to overlapping CIs.
-
 ---@param samples number[]
 ---@return luamark.BaseStats
 local function calculate_stats(samples)
@@ -274,6 +254,7 @@ do
    if ok and system.termsize then
       get_term_width = function()
          local rows, cols = system.termsize()
+         -- termsize returns (nil, error_string) on failure; check rows to detect success
          return rows and cols or DEFAULT_TERM_WIDTH
       end
    else
@@ -287,20 +268,20 @@ end
 
 -- Thresholds relative to input unit (seconds)
 local TIME_UNITS = {
-   { "m", 60, "%.2f" },
-   { "s", 1, "%.2f" },
-   { "ms", 1e-3, "%.2f" },
-   { "us", 1e-6, "%.2f" },
-   { "ns", 1e-9, "%.2f" },
+   { "m", 60, "%.0f" },
+   { "s", 1, "%.0f" },
+   { "ms", 1e-3, "%.0f" },
+   { "us", 1e-6, "%.0f" },
+   { "ns", 1e-9, "%.0f" },
 }
 
 -- Thresholds relative to input unit (kilobytes)
 local MEMORY_UNITS = {
-   { "TB", 1024 ^ 3, "%.2f" },
-   { "GB", 1024 ^ 2, "%.2f" },
-   { "MB", 1024, "%.2f" },
-   { "kB", 1, "%.2f" },
-   { "B", 1 / 1024, "%.2f" },
+   { "TB", 1024 ^ 3, "%.0f" },
+   { "GB", 1024 ^ 2, "%.0f" },
+   { "MB", 1024, "%.0f" },
+   { "kB", 1, "%.0f" },
+   { "B", 1 / 1024, "%.0f" },
 }
 
 local COUNT_UNITS = {
@@ -325,28 +306,25 @@ local EMBEDDED_BAR_WIDTH = 8
 local SUMMARIZE_HEADERS = {
    "name",
    "rank",
-   "ratio",
+   "factor",
    "median",
-   "ci_low",
-   "ci_high",
    "ops",
-   "rounds",
 }
 
 local HEADER_LABELS = {
    name = "Name",
    rank = "Rank",
-   ratio = "Ratio",
+   factor = "Factor",
    median = "Median",
-   ci_low = "CI Low",
-   ci_high = "CI High",
    ops = "Ops",
-   rounds = "Rounds",
 }
 
 ---@param str string
 ---@return string
 local function trim_zeroes(str)
+   if not str:find("%.") then
+      return str
+   end
    return (str:gsub("%.?0+$", ""))
 end
 
@@ -368,8 +346,15 @@ end
 ---@param str string
 ---@param width integer
 ---@return string
-local function pad(str, width)
+local function align_left(str, width)
    return str .. string.rep(" ", width - display_width(str))
+end
+
+---@param str string
+---@param width integer
+---@return string
+local function align_right(str, width)
+   return string.rep(" ", width - display_width(str)) .. str
 end
 
 ---@param str string
@@ -418,12 +403,25 @@ local function humanize(value, unit_type)
    return "0" .. units[#units][1]
 end
 
+--- Format median with optional margin (hidden when margin rounds to zero).
+---@param median number
+---@param margin number
+---@param unit default_unit
+---@return string
+local function format_median(median, margin, unit)
+   local margin_str = humanize(margin, unit)
+   if margin_str:match("^0") then
+      return humanize(median, unit)
+   end
+   return humanize(median, unit) .. " ± " .. margin_str
+end
+
 --- Format statistical measurements into a readable string.
 ---@param stats table The statistical measurements to format.
 ---@param unit default_unit
 ---@return string # A formatted string representing the statistical metrics.
 local function stats_tostring(stats, unit)
-   return humanize(stats.median, unit) .. " ± " .. humanize(stats.ci_margin, unit)
+   return format_median(stats.median, stats.ci_margin, unit)
 end
 
 --- Format a single Stats object as a multi-line key-value string.
@@ -449,6 +447,25 @@ local function render_stats(stats)
    return table.concat(lines, "\n")
 end
 
+--- Format factor value with direction arrow.
+--- - 1x = baseline (no arrow)
+--- - ↑Nx = N times faster than baseline
+--- - ↓Nx = N times slower than baseline
+---@param factor number|nil Factor relative to baseline.
+---@return string Formatted factor string (e.g., "1x", "↑7.14x", "↓2.5x").
+local function format_factor(factor)
+   if not factor then
+      return ""
+   end
+   if factor == 1 then
+      return "1x"
+   elseif factor < 1 then
+      return "↑" .. trim_zeroes(string.format("%.2f", 1 / factor)) .. "x"
+   else
+      return "↓" .. trim_zeroes(string.format("%.2f", factor)) .. "x"
+   end
+end
+
 --- Format stats into display strings for table rendering.
 ---@param stats luamark.Stats|luamark.Result
 ---@return table<string, string>
@@ -464,12 +481,9 @@ local function format_row(stats)
 
    return {
       rank = rank_str,
-      ratio = stats.ratio and string.format("%.2f", stats.ratio) or "",
-      median = humanize(stats.median, unit),
-      ci_low = humanize(stats.ci_lower, unit),
-      ci_high = humanize(stats.ci_upper, unit),
+      factor = format_factor(stats.factor),
+      median = format_median(stats.median, stats.ci_margin, unit),
       ops = stats.ops and (humanize(stats.ops, "count") .. "/s") or "",
-      rounds = tostring(stats.rounds),
    }
 end
 
@@ -511,36 +525,37 @@ local function fit_names(rows, widths, max_width)
    end
 end
 
----Build combined bar + ratio label (e.g., "█████ 1.00x")
----Bar is padded to fixed width so ratio labels align.
----@param ratio_str string
+---Build combined bar + factor label (e.g., "█████ 1.00x")
+---Bar is padded to fixed width so factor labels align.
+---@param factor_str string Formatted factor string (e.g., "1.00x", "↑7.14x")
 ---@param bar_width integer Display width of the bar (number of █ characters)
----@param max_ratio_width integer
+---@param max_factor_width integer Max display width of factor strings (for alignment)
 ---@return string
-local function build_ratio_bar(ratio_str, bar_width, max_ratio_width)
+local function build_factor_bar(factor_str, bar_width, max_factor_width)
    local bar = string.rep(BAR_CHAR, bar_width)
    local padded_bar = bar .. string.rep(" ", EMBEDDED_BAR_WIDTH - bar_width)
-   local padded_ratio = string.rep(" ", max_ratio_width - #ratio_str) .. ratio_str
-   return padded_bar .. " " .. padded_ratio .. "x"
+   -- Use display_width for UTF-8 aware padding (arrows are multi-byte)
+   local padded_factor = string.rep(" ", max_factor_width - display_width(factor_str)) .. factor_str
+   return padded_bar .. " " .. padded_factor
 end
 
 ---Render compact bar chart.
----@param rows {name: string, ratio: string, median: string}[]
+---Bars are scaled by median (smaller bar = faster).
+---@param rows {name: string, factor: string, median: string, median_value: number}[]
 ---@param max_width? integer
 ---@return string[]
 local function render_bar_chart(rows, max_width)
    max_width = max_width or get_term_width()
 
-   local max_ratio = 1
+   local max_median = 0
    local max_suffix_len = 0
    local max_name_len = NAME_MIN_WIDTH
    for i = 1, #rows do
       local row = rows[i]
-      local ratio = tonumber(row.ratio) or 1
-      max_ratio = math_max(max_ratio, ratio)
-      -- Suffix format: " Nx (median)" -> space + "x" + " (" + ")" = 5 fixed chars
-      max_suffix_len = math_max(max_suffix_len, 5 + #row.ratio + #row.median)
-      max_name_len = math_max(max_name_len, #row.name)
+      max_median = math_max(max_median, row.median_value)
+      -- Suffix format: " factor (median)" -> " " + " (" + ")" = 3 fixed chars
+      max_suffix_len = math_max(max_suffix_len, 3 + display_width(row.factor) + #row.median)
+      max_name_len = math_max(max_name_len, display_width(row.name))
    end
 
    -- Calculate column widths
@@ -551,34 +566,42 @@ local function render_bar_chart(rows, max_width)
    local lines = {}
    for i = 1, #rows do
       local row = rows[i]
-      local ratio = tonumber(row.ratio) or 1
-      local bar_width = math_max(1, math_floor((ratio / max_ratio) * bar_max))
-      local name = pad(truncate_name(row.name, name_max), name_max)
+      -- Scale bar by median (smaller bar = less time = faster)
+      local bar_width = math_max(1, math_floor((row.median_value / max_median) * bar_max))
+      local name = align_left(truncate_name(row.name, name_max), name_max)
       local bar = string.rep(BAR_CHAR, bar_width)
-      lines[i] = string.format("%s  |%s %sx (%s)", name, bar, row.ratio, row.median)
+      lines[i] = string.format("%s  |%s %s (%s)", name, bar, row.factor, row.median)
    end
    return lines
 end
 
----Render plain text table with embedded bar chart in ratio column.
+-- Columns that should be right-aligned
+local RIGHT_ALIGN_COLS = { rank = true, median = true, ops = true }
+
+---Render plain text table with embedded bar chart in factor column.
+---Bars are scaled by median (smaller bar = faster).
 ---@param rows table[]
 ---@param widths integer[]
+---@param show_ops boolean Whether to show the ops column
 ---@return string
-local function render_plain_table(rows, widths)
-   local max_ratio = 1
-   local max_ratio_width = 0
+local function render_plain_table(rows, widths, show_ops)
+   local max_median = 0
+   local max_factor_width = 0
    for i = 1, #rows do
-      max_ratio = math_max(max_ratio, tonumber(rows[i].ratio) or 1)
-      max_ratio_width = math_max(max_ratio_width, #rows[i].ratio)
+      max_median = math_max(max_median, rows[i].median_value)
+      max_factor_width = math_max(max_factor_width, display_width(rows[i].factor))
    end
-   local ratio_bar_width = EMBEDDED_BAR_WIDTH + max_ratio_width + 2
+   local factor_bar_width = EMBEDDED_BAR_WIDTH + max_factor_width + 1
 
    local header_cells, underline_cells = {}, {}
    for i, header in ipairs(SUMMARIZE_HEADERS) do
-      local width = (header == "ratio") and ratio_bar_width or widths[i]
-      local label = HEADER_LABELS[header]
-      header_cells[#header_cells + 1] = center(label, width)
-      underline_cells[#underline_cells + 1] = string.rep("-", width)
+      -- Skip ops column for memory benchmarks
+      if header ~= "ops" or show_ops then
+         local width = (header == "factor") and factor_bar_width or widths[i]
+         local label = HEADER_LABELS[header]
+         header_cells[#header_cells + 1] = center(label, width)
+         underline_cells[#underline_cells + 1] = string.rep("-", width)
+      end
    end
 
    local lines = { concat_line(header_cells), concat_line(underline_cells) }
@@ -587,13 +610,21 @@ local function render_plain_table(rows, widths)
       local row = rows[r]
       local cells = {}
       for i, header in ipairs(SUMMARIZE_HEADERS) do
-         if header == "ratio" then
-            local ratio = tonumber(row.ratio) or 1
-            local bar_width = math_max(1, math_floor((ratio / max_ratio) * EMBEDDED_BAR_WIDTH))
-            cells[#cells + 1] =
-               pad(build_ratio_bar(row.ratio, bar_width, max_ratio_width), ratio_bar_width)
-         else
-            cells[#cells + 1] = pad(row[header], widths[i])
+         -- Skip ops column for memory benchmarks
+         if header ~= "ops" or show_ops then
+            if header == "factor" then
+               -- Scale bar by median (smaller bar = less time = faster)
+               local bar_width =
+                  math_max(1, math_floor((row.median_value / max_median) * EMBEDDED_BAR_WIDTH))
+               cells[#cells + 1] = align_left(
+                  build_factor_bar(row.factor, bar_width, max_factor_width),
+                  factor_bar_width
+               )
+            elseif RIGHT_ALIGN_COLS[header] then
+               cells[#cells + 1] = align_right(row[header], widths[i])
+            else
+               cells[#cells + 1] = align_left(row[header], widths[i])
+            end
          end
       end
       lines[#lines + 1] = concat_line(cells)
@@ -612,6 +643,8 @@ local function render_summary(results, format, max_width)
    for i = 1, #results do
       local row = format_row(results[i])
       row.name = results[i].name
+      ---@diagnostic disable-next-line: assign-type-mismatch
+      row.median_value = results[i].median
       rows[i] = row
    end
 
@@ -621,9 +654,12 @@ local function render_summary(results, format, max_width)
       return table.concat(render_bar_chart(rows, max_width), "\n")
    end
 
+   -- Show ops column only for time benchmarks (unit="s")
+   local show_ops = results[1] and results[1].unit == "s"
+
    local widths = calculate_column_widths(rows)
    fit_names(rows, widths, max_width)
-   return render_plain_table(rows, widths)
+   return render_plain_table(rows, widths, show_ops)
 end
 
 -- ----------------------------------------------------------------------------
@@ -693,10 +729,9 @@ end
 local ROUNDING_EPSILON = 0.50000000000008
 
 ---@param num number
----@param precision number
+---@param precision integer
 ---@return number
 local function math_round(num, precision)
-   precision = precision or 0
    local mul = 10 ^ precision
    local rounded
    if num > 0 then
@@ -872,17 +907,6 @@ local function validate_params(params)
    end
 end
 
----@class luamark.Options Benchmark configuration for timeit/memit.
----@field rounds? integer Target number of benchmark rounds.
----@field time? number Target duration in seconds.
----@field setup? fun(): any Function executed once before benchmark; returns context.
----@field teardown? fun(ctx?: any) Function executed once after benchmark.
-
----@class luamark.SuiteOptions : luamark.Options Configuration for compare_time/compare_memory.
----@field setup? fun(p: table): any Function executed once before benchmark; receives params, returns context.
----@field teardown? fun(ctx: any, p: table) Function executed once after benchmark.
----@field params? table<string, ParamValue[]> Parameter combinations to benchmark across.
-
 --- Validate options for single API (timeit/memit).
 --- Reject params option with helpful error message.
 ---@param opts luamark.Options Options to validate.
@@ -971,7 +995,7 @@ local function make_invoke(single_mode, params)
 end
 
 --- Run a benchmark on a function using a specified measurement method.
----@param fn luamark.Fn Function to benchmark.
+---@param fn luamark.Fun Function to benchmark.
 ---@param measure Measure Measurement function (e.g., measure_time or measure_memory).
 ---@param suspend_gc boolean Controls garbage collection during benchmark.
 ---@param unit default_unit Measurement unit.
@@ -1090,28 +1114,12 @@ local function single_benchmark(
    return build_stats_result(samples, completed_rounds, iterations, timestamp, unit)
 end
 
---- Function to benchmark (single API). Arguments can be omitted from the right.
----@alias luamark.Fn fun(ctx: any, p: table)
-
---- Per-iteration setup; returns iteration context.
----@alias luamark.before fun(ctx: any, p: table): any
-
---- Per-iteration setup; returns iteration context.
----@alias luamark.after fun(ctx: any, p: table)
-
---- Per-function benchmark specification with optional lifecycle hooks.
---- Use when comparing functions that need different setup/teardown.
---- Unlike Options.setup/teardown (run once), Spec hooks run each iteration.
----@class luamark.Spec
----@field fn luamark.Fn  Benchmark function; receives iteration context and params.
----@field before? luamark.before Per-iteration setup; returns iteration context.
----@field after? luamark.after Per-iteration setup; returns iteration context.
-
 --- Parse a benchmark specification into its components.
----@param spec luamark.Fn|luamark.Spec Function or Spec table.
----@return luamark.Fn fn Benchmark function.
----@return luamark.before ? before Per-iteration setup.
+---@param spec luamark.Fun|luamark.Spec Function or Spec table.
+---@return luamark.Fun fn Benchmark function.
+---@return luamark.before? before Per-iteration setup.
 ---@return luamark.after? after Per-iteration teardown.
+---@return boolean? baseline If true, this function serves as 1x baseline.
 local function parse_spec(spec)
    if type(spec) == "function" then
       return spec
@@ -1120,52 +1128,26 @@ local function parse_spec(spec)
    assert(type(spec.fn) == "function", "spec.fn must be a function")
    assert(not spec.before or type(spec.before) == "function", "spec.before must be a function")
    assert(not spec.after or type(spec.after) == "function", "spec.after must be a function")
-   return spec.fn, spec.before, spec.after
+   assert(
+      spec.baseline == nil or type(spec.baseline) == "boolean",
+      "spec.baseline must be a boolean"
+   )
+   return spec.fn, spec.before, spec.after, spec.baseline
 end
 
 -- ----------------------------------------------------------------------------
 -- Result helpers
 -- ----------------------------------------------------------------------------
 
----@class luamark.Result : luamark.BaseStats
----@field name string Benchmark name.
----@field rounds integer Number of rounds executed (one sample per round).
----@field iterations integer Number of iterations per round.
----@field timestamp string ISO 8601 UTC timestamp of benchmark start.
----@field unit "s"|"kb" Measurement unit (seconds or kilobytes).
----@field ops? number Operations per second (1/median). Only present for time benchmarks.
----@field ratio? number Ratio relative to fastest benchmark.
----@field rank? integer Rank accounting for CI overlap (tied results share the same rank).
----@field is_approximate? boolean True if rank is approximate due to overlapping CIs.
--- Plus any param keys inlined directly on the result (e.g., result.n, result.size)
-
--- Keys that are part of stats, not user params
-local STAT_KEYS = {
-   name = true,
-   median = true,
-   ci_lower = true,
-   ci_upper = true,
-   ci_margin = true,
-   total = true,
-   samples = true,
-   rounds = true,
-   iterations = true,
-   timestamp = true,
-   unit = true,
-   ops = true,
-   ratio = true,
-   rank = true,
-   is_approximate = true,
-}
-
----Collect all unique parameter names from flat result rows.
+---Collect all unique parameter names from result rows.
 ---@param rows luamark.Result[]
 ---@return string[]
 local function collect_param_names(rows)
    local seen = {}
    for i = 1, #rows do
-      for key in pairs(rows[i]) do
-         if not STAT_KEYS[key] then
+      local params = rows[i].params
+      if params then
+         for key in pairs(params) do
             seen[key] = true
          end
       end
@@ -1173,16 +1155,17 @@ local function collect_param_names(rows)
    return sorted_keys(seen)
 end
 
----Format parameter values as a readable string from flat result.
+---Format parameter values as a readable string from result.
 ---@param row luamark.Result
 ---@param param_names string[]
 ---@return string
 local function format_params(row, param_names)
    local parts = {}
+   local params = row.params or {}
    for i = 1, #param_names do
       local name = param_names[i]
-      if row[name] ~= nil then
-         parts[#parts + 1] = name .. "=" .. tostring(row[name])
+      if params[name] ~= nil then
+         parts[#parts + 1] = name .. "=" .. tostring(params[name])
       end
    end
    return table.concat(parts, ", ")
@@ -1208,19 +1191,30 @@ local function rank_results(results, param_names)
       groups[key][#groups[key] + 1] = row
    end
 
-   for _, group in pairs(groups) do
+   for key, group in pairs(groups) do
       table_sort(group, compare_by_median)
 
+      -- Find baseline row (if any) and validate only one exists
+      local baseline_row = nil
+      for _, row in ipairs(group) do
+         if row.baseline then
+            assert(baseline_row == nil, "multiple baselines in group: " .. key)
+            baseline_row = row
+         end
+      end
+
+      -- Use baseline median if specified, otherwise use fastest (first after sort)
+      local baseline_median = baseline_row and baseline_row.median or group[1].median
+
       local first = group[1]
-      local min_median = first.median
-      first.ratio = 1
+      first.factor = baseline_median > 0 and (first.median / baseline_median) or 1
       first.rank = 1
       first.is_approximate = false
 
       for i = 2, #group do
          local r = group[i]
          local prev = group[i - 1]
-         r.ratio = min_median > 0 and (r.median / min_median) or 1
+         r.factor = baseline_median > 0 and (r.median / baseline_median) or 1
 
          if r.ci_lower <= prev.ci_upper and prev.ci_lower <= r.ci_upper then
             r.rank = prev.rank
@@ -1258,7 +1252,7 @@ local function benchmark_suite(funcs, measure, suspend_gc, unit, opts)
    local names = sorted_keys(funcs)
    for j = 1, #names do
       local name = names[j]
-      local fn, before, after = parse_spec(funcs[name])
+      local fn, before, after, baseline = parse_spec(funcs[name])
       for i = 1, #params_list do
          local p = params_list[i]
          local stats = single_benchmark(
@@ -1275,13 +1269,13 @@ local function benchmark_suite(funcs, measure, suspend_gc, unit, opts)
             after,
             false -- suite mode: hooks receive params
          )
-         -- Flatten: merge params and stats into single row
-         local row = { name = name }
-         for pk, pv in pairs(p) do
-            row[pk] = pv
-         end
+         -- Build result row with nested params
+         local row = { name = name, params = p }
          for sk, sv in pairs(stats) do
             row[sk] = sv
+         end
+         if baseline then
+            row.baseline = true
          end
          results[#results + 1] = row
       end
@@ -1300,6 +1294,67 @@ end
 -- ----------------------------------------------------------------------------
 -- Public API
 -- ----------------------------------------------------------------------------
+
+---@class luamark.BaseStats
+---@field median number Median value of samples.
+---@field ci_lower number Lower bound of 95% confidence interval for median.
+---@field ci_upper number Upper bound of 95% confidence interval for median.
+---@field ci_margin number Half-width of confidence interval ((upper - lower) / 2).
+---@field total number Sum of all samples.
+---@field samples number[] Raw samples (sorted).
+---@field factor? number Factor relative to baseline (or fastest if no baseline).
+---@field rank? integer Rank within benchmark group.
+
+---@class luamark.Stats : luamark.BaseStats
+---@field rounds integer Number of rounds executed (one sample per round).
+---@field iterations integer Number of iterations per round.
+---@field timestamp string ISO 8601 UTC timestamp of benchmark start.
+---@field unit "s"|"kb" Measurement unit (seconds or kilobytes).
+---@field ops? number Operations per second (1/median). Only present for time benchmarks.
+---@field factor? number Factor relative to baseline (or fastest if no baseline).
+---@field rank? integer Rank accounting for CI overlap (tied results share the same rank).
+---@field is_approximate? boolean True if rank is approximate due to overlapping CIs.
+
+---@class luamark.Result : luamark.BaseStats
+---@field name string Benchmark name.
+---@field rounds integer Number of rounds executed (one sample per round).
+---@field iterations integer Number of iterations per round.
+---@field timestamp string ISO 8601 UTC timestamp of benchmark start.
+---@field unit "s"|"kb" Measurement unit (seconds or kilobytes).
+---@field ops? number Operations per second (1/median). Only present for time benchmarks.
+---@field factor? number Factor relative to baseline (or fastest if no baseline).
+---@field rank? integer Rank accounting for CI overlap (tied results share the same rank).
+---@field is_approximate? boolean True if rank is approximate due to overlapping CIs.
+---@field params table<string, any> User-defined parameters for this benchmark run.
+
+---@class luamark.Options Benchmark configuration for timeit/memit.
+---@field rounds? integer Target number of benchmark rounds.
+---@field time? number Target duration in seconds.
+---@field setup? fun(): any Called once before all iterations; returns context passed to fn.
+---@field teardown? fun(ctx?: any) Called once after all rounds complete.
+
+---@class luamark.SuiteOptions : luamark.Options Configuration for compare_time/compare_memory.
+---@field setup? fun(params: table): any Called once per param combo (not per iteration); returns ctx.
+---@field teardown? fun(ctx: any, params: table) Called once per param combo after all rounds.
+---@field params? table<string, ParamValue[]> Parameter combinations to benchmark across.
+
+--- Function to benchmark. Arguments can be omitted from the right.
+---@alias luamark.Fun fun(ctx: any, params: table)
+
+--- Per-iteration setup; returns iteration context.
+---@alias luamark.before fun(ctx: any, params: table): any
+
+--- Per-iteration teardown; returns iteration context.
+---@alias luamark.after fun(ctx: any, params: table)
+
+--- Per-function benchmark specification with optional lifecycle hooks.
+--- Use when comparing functions that need different setup/teardown.
+--- Unlike Options.setup/teardown (run once), Spec hooks run each iteration.
+---@class luamark.Spec
+---@field fn luamark.Fun  Benchmark function; receives iteration context and params.
+---@field before? luamark.before Per-iteration setup; returns iteration context.
+---@field after? luamark.after Per-iteration teardown; returns iteration context.
+---@field baseline? boolean If true, this function serves as 1x baseline for factor comparison.
 
 --- Render benchmark results as a formatted string.
 ---
@@ -1355,7 +1410,7 @@ end
 
 --- Benchmark a single function for execution time.
 --- Time is represented in seconds.
----@param fn luamark.Fn Function to benchmark.
+---@param fn luamark.Fun Function to benchmark.
 ---@param opts? luamark.Options Benchmark configuration.
 ---@return luamark.Stats Benchmark statistics.
 function luamark.timeit(fn, opts)
@@ -1380,7 +1435,7 @@ end
 
 --- Benchmark a single function for memory usage.
 --- Memory is represented in kilobytes.
----@param fn luamark.Fn Function to benchmark.
+---@param fn luamark.Fun Function to benchmark.
 ---@param opts? luamark.Options Benchmark configuration.
 ---@return luamark.Stats Benchmark statistics.
 function luamark.memit(fn, opts)
@@ -1406,7 +1461,7 @@ end
 --- Compare multiple functions for execution time.
 --- Time is represented in seconds.
 --- Results are sorted by parameter group, then by rank (fastest first) within each group.
----@param funcs table<string, luamark.Fn|luamark.Spec> Table of named functions or Specs to benchmark.
+---@param funcs table<string, luamark.Fun|luamark.Spec> Table of named functions or Specs to benchmark.
 ---@param opts? luamark.SuiteOptions Benchmark configuration with optional params.
 ---@return luamark.Result[] Sorted array of benchmark results with ranking.
 function luamark.compare_time(funcs, opts)
@@ -1420,7 +1475,7 @@ end
 --- Compare multiple functions for memory usage.
 --- Memory is represented in kilobytes.
 --- Results are sorted by parameter group, then by rank (fastest first) within each group.
----@param funcs table<string, luamark.Fn|luamark.Spec> Table of named functions or Specs to benchmark.
+---@param funcs table<string, luamark.Fun|luamark.Spec> Table of named functions or Specs to benchmark.
 ---@param opts? luamark.SuiteOptions Benchmark configuration with optional params.
 ---@return luamark.Result[] Sorted array of benchmark results with ranking.
 function luamark.compare_memory(funcs, opts)

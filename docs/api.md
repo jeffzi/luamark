@@ -97,8 +97,8 @@ print(stats.ci_lower, stats.ci_upper)  -- full CI bounds
 ---@class Options
 ---@field rounds? integer Target number of benchmark rounds.
 ---@field time? number Target duration in seconds.
----@field setup? fun(): any Function executed once before benchmark; returns context.
----@field teardown? fun(ctx?: any) Function executed once after benchmark.
+---@field setup? fun(): any Called once before all iterations; returns context passed to fn.
+---@field teardown? fun(ctx?: any) Called once after all rounds complete.
 ```
 
 **Execution order:**
@@ -128,7 +128,7 @@ multiple functions, optionally with parameterized benchmarks.
 
 ```lua
 function luamark.compare_time(
-   funcs: table<string, fun(ctx?: any, p:table)|Spec>,
+   funcs: table<string, fun(ctx?: any, params: table)|Spec>,
    opts?: SuiteOptions
 ) -> Result[]
 ```
@@ -160,7 +160,7 @@ print(results)  -- Prints formatted comparison table
 
 ```lua
 function luamark.compare_memory(
-   funcs: table<string, fun(ctx?: any, p:table)|Spec>,
+   funcs: table<string, fun(ctx?: any, params: table)|Spec>,
    opts?: SuiteOptions
 ) -> Result[]
 ```
@@ -176,8 +176,8 @@ See [`SuiteOptions`](#suiteoptions) for configuration and [`Spec`](#spec) for pe
 ---@class SuiteOptions
 ---@field rounds? integer Target number of benchmark rounds.
 ---@field time? number Target duration in seconds.
----@field setup? fun(p: table): any Function executed once; receives params, returns context.
----@field teardown? fun(ctx: any, p: table) Function executed once after benchmark.
+---@field setup? fun(params: table): any Called once per param combo (not per iteration); returns ctx.
+---@field teardown? fun(ctx: any, params: table) Called once per param combo after all rounds.
 ---@field params? table<string, ParamValue[]> Parameter combinations to benchmark across.
 ```
 
@@ -205,10 +205,21 @@ instead of a plain function:
 
 ```lua
 ---@class Spec
----@field fn fun(ctx: any, p: table) Benchmark function; receives iteration context and params.
----@field before? fun(ctx: any, p: table): any Per-iteration setup; returns iteration context.
----@field after? fun(ctx: any, p: table) Per-iteration teardown.
+---@field fn fun(ctx: any, params: table) Benchmark function; receives iteration context and params.
+---@field before? fun(ctx: any, params: table): any Per-iteration setup; returns iteration context.
+---@field after? fun(ctx: any, params: table) Per-iteration teardown.
+---@field baseline? boolean If true, this function is the 1x reference for factor comparison.
 ```
+
+**Baseline:** Set `baseline = true` on a Spec to make that function the reference point
+for factor calculations. By default, the fastest function in each parameter group has
+factor `1x`. With a baseline, the baseline function always shows `1x`, and other
+functions show their performance relative to it with direction arrows:
+
+- `↑Nx` = N times faster than baseline
+- `↓Nx` = N times slower than baseline
+
+Only one function per parameter group can be marked as baseline.
 
 **Execution order with Spec:**
 
@@ -303,39 +314,51 @@ print(luamark.render(results))  -- Prints full table with all stats
 within each group (fastest first). This means you can iterate over results in
 display order without additional sorting.
 
-Results have a flat structure with stats and params merged directly:
+Stats fields are directly on the result, while user params are nested in `result.params`:
 
 ```lua
--- Accessing result fields directly (flat structure)
+-- Accessing result fields
 local result = results[1]
-print(result.name)     -- "a"
-print(result.median)   -- number (stats field)
-print(result.n)        -- 100 (param field, if params = {n = {100}} was used)
+print(result.name)       -- "a"
+print(result.median)     -- number (stats field)
+print(result.params.n)   -- 100 (param field, if params = {n = {100}} was used)
 ```
 
-| Field          | Type      | Description                                              |
-| -------------- | --------- | -------------------------------------------------------- |
-| name           | string    | Benchmark name                                           |
-| median         | number    | Median value of samples                                  |
-| ci_lower       | number    | Lower bound of 95% CI for median                         |
-| ci_upper       | number    | Upper bound of 95% CI for median                         |
-| ci_margin      | number    | Half-width of CI ((upper - lower) / 2)                   |
-| total          | number    | Sum of all samples                                       |
-| samples        | number[]  | Raw samples (sorted)                                     |
-| rounds         | integer   | Number of rounds (samples) collected                     |
-| iterations     | integer   | Number of iterations per round                           |
-| timestamp      | string    | ISO 8601 UTC timestamp of benchmark start                |
-| unit           | "s"\|"kb" | Measurement unit (seconds or kilobytes)                  |
-| ops            | number?   | Operations per second (1/median, time benchmarks only)   |
-| rank           | integer?  | Rank accounting for CI overlap                           |
-| ratio          | number?   | Ratio to fastest                                         |
-| is_approximate | boolean?  | True if rank is tied due to CI overlap                   |
-| _param_name_   | any       | Any param values are inlined directly (e.g., `result.n`) |
+| Field          | Type                 | Description                                            |
+| -------------- | -------------------- | ------------------------------------------------------ |
+| name           | string               | Benchmark name                                         |
+| median         | number               | Median value of samples                                |
+| ci_lower       | number               | Lower bound of 95% CI for median                       |
+| ci_upper       | number               | Upper bound of 95% CI for median                       |
+| ci_margin      | number               | Half-width of CI ((upper - lower) / 2)                 |
+| total          | number               | Sum of all samples                                     |
+| samples        | number[]             | Raw samples (sorted)                                   |
+| rounds         | integer              | Number of rounds (samples) collected                   |
+| iterations     | integer              | Number of iterations per round                         |
+| timestamp      | string               | ISO 8601 UTC timestamp of benchmark start              |
+| unit           | "s"\|"kb"            | Measurement unit (seconds or kilobytes)                |
+| ops            | number?              | Operations per second (1/median, time benchmarks only) |
+| rank           | integer?             | Rank accounting for CI overlap                         |
+| factor         | number?              | Factor relative to baseline (or fastest if none)       |
+| is_approximate | boolean?             | True if rank is tied due to CI overlap                 |
+| params         | table\<string, any\> | User-defined parameters (e.g., `result.params.n`)      |
 
 **Rank display:** When results have overlapping confidence intervals, they share the
 same rank with an `≈` prefix. For example, `≈1 ≈1 3` means the first two results have
 overlapping CIs (statistically indistinguishable), while the third is clearly slower.
 The gap in rank numbers (1 to 3) indicates skipped positions.
+
+**Factor display:** Factors are shown with direction arrows relative to the baseline:
+
+- `1x` = baseline function (no arrow)
+- `↑7.14x` = 7.14 times faster than baseline
+- `↓2.5x` = 2.5 times slower than baseline
+
+**Median display:** The Median column shows `value ± ci_margin` (e.g., `42ns ± 1ns`).
+
+**Ops column:** Only shown for time benchmarks (unit="s"), hidden for memory benchmarks.
+
+The bar chart scales by median time/memory (smaller bar = faster/less memory).
 
 ---
 
@@ -433,7 +456,7 @@ or an array of [`Result`](#result) objects
 
 @_param_ `short` — Output format. Ignored for single Stats.
 
-- `false` or `nil` (default): Full table with embedded bar chart in ratio column
+- `false` or `nil` (default): Full table with embedded bar chart in Factor column
 - `true`: Bar chart only (compact)
 
 @_param_ `max_width` — Maximum output width (default: terminal width). Ignored for single Stats.

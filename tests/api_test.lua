@@ -48,7 +48,8 @@ describe("simple API (timeit/memit)", function()
       local stats = luamark.timeit(h.noop, { rounds = 3 })
       local str = tostring(stats)
 
-      assert.matches("±", str)
+      -- Should contain humanized time (ns, us, ms, or s)
+      assert.matches("[num]s", str)
    end)
 end)
 
@@ -59,7 +60,7 @@ describe("suite API (compare_time/compare_memory)", function()
       luamark = h.load_luamark()
    end)
 
-   test("params are passed to function and inlined in results", function()
+   test("params are passed to function and nested in results", function()
       local seen_n = {}
       local results = luamark.compare_time({
          test = function(ctx, p)
@@ -74,8 +75,28 @@ describe("suite API (compare_time/compare_memory)", function()
       assert.is_true(seen_n[20])
       assert.are_equal(2, #results)
       assert.is_not_nil(results[1].median)
-      -- Params are inlined directly on the result
-      assert.is_true(results[1].n == 10 or results[1].n == 20)
+      -- Params are nested in result.params
+      assert.is_not_nil(results[1].params)
+      assert.is_true(results[1].params.n == 10 or results[1].params.n == 20)
+   end)
+
+   test("reserved names can be used as param keys without collision", function()
+      local results = luamark.compare_time({
+         test = h.noop,
+      }, {
+         params = { median = { "test_value" }, name = { "custom" }, factor = { 99 } },
+         rounds = 1,
+      })
+
+      assert.are_equal(1, #results)
+      -- Stats fields are preserved
+      assert.is_number(results[1].median)
+      assert.is_string(results[1].name)
+      assert.is_number(results[1].factor)
+      -- User params are accessible via nested params table
+      assert.are_equal("test_value", results[1].params.median)
+      assert.are_equal("custom", results[1].params.name)
+      assert.are_equal(99, results[1].params.factor)
    end)
 
    test("multiple params expand as cartesian product", function()

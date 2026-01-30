@@ -110,8 +110,7 @@ for _, clock_name in ipairs(h.CLOCKS) do
          end)
       end
 
-      for _, api in ipairs({ { "compare_time", "timeit" }, { "compare_memory", "memit" } }) do
-         local compare_fn = api[1]
+      for _, compare_fn in ipairs({ "compare_time", "compare_memory" }) do
          local suffix = " (" .. compare_fn .. ")"
 
          test("benchmarks multiple functions" .. suffix, function()
