@@ -50,17 +50,6 @@ describe("simple API (timeit/memit)", function()
 
       assert.matches("±", str)
    end)
-
-   test("function receives timer as second argument", function()
-      local received_timer
-      luamark.timeit(function(ctx, timer)
-         received_timer = timer
-      end, { rounds = 1 })
-
-      assert.is_not_nil(received_timer)
-      assert.is_function(received_timer.start)
-      assert.is_function(received_timer.stop)
-   end)
 end)
 
 describe("suite API (compare_time/compare_memory)", function()
@@ -73,8 +62,8 @@ describe("suite API (compare_time/compare_memory)", function()
    test("params are passed to function and inlined in results", function()
       local seen_n = {}
       local results = luamark.compare_time({
-         test = function(ctx, timer, params)
-            seen_n[params.n] = true
+         test = function(ctx, p)
+            seen_n[p.n] = true
          end,
       }, {
          params = { n = { 10, 20 } },
@@ -92,8 +81,8 @@ describe("suite API (compare_time/compare_memory)", function()
    test("multiple params expand as cartesian product", function()
       local seen = {}
       luamark.compare_time({
-         test = function(ctx, timer, params)
-            seen[params.n .. "_" .. tostring(params.flag)] = true
+         test = function(ctx, p)
+            seen[p.n .. "_" .. tostring(p.flag)] = true
          end,
       }, {
          params = { n = { 1, 2 }, flag = { true, false } },
@@ -136,20 +125,99 @@ describe("suite API (compare_time/compare_memory)", function()
       assert.are_equal(4, #results)
    end)
 
-   describe("funcs validation", function()
-      for _, name in ipairs({ "compare_time", "compare_memory" }) do
-         test(name .. " rejects array (numeric keys)", function()
-            assert.has_error(function()
-               luamark[name]({ h.noop, h.noop }, { rounds = 1 })
-            end, "'funcs' keys must be strings, got number. Use named keys: { name = fn }")
-         end)
+   test("bench functions can be plain functions or tables with fn", function()
+      local plain_called, table_called = false, false
 
-         test(name .. " rejects non-function values", function()
-            assert.has_error(function()
-               luamark[name]({ test = "not a function" }, { rounds = 1 })
-            end, "funcs['test'] must be a function")
-         end)
-      end
+      luamark.compare_time({
+         plain = function()
+            plain_called = true
+         end,
+         with_setup = {
+            fn = function()
+               table_called = true
+            end,
+         },
+      }, { rounds = 1 })
+
+      assert.is_true(plain_called)
+      assert.is_true(table_called)
+   end)
+
+   for _, name in ipairs({ "compare_time", "compare_memory" }) do
+      test(name .. " rejects array (numeric keys)", function()
+         assert.has_error(function()
+            luamark[name]({ h.noop, h.noop }, { rounds = 1 })
+         end, "'funcs' keys must be strings, got number. Use named keys: { name = fn }")
+      end)
+   end
+end)
+
+describe("Timer", function()
+   local luamark
+   local socket = require("socket")
+
+   setup(function()
+      luamark = h.load_luamark()
+   end)
+
+   test("Timer() creates a new timer instance", function()
+      local timer = luamark.Timer()
+      assert.is_table(timer)
+      assert.is_function(timer.start)
+      assert.is_function(timer.stop)
+      assert.is_function(timer.elapsed)
+      assert.is_function(timer.reset)
+   end)
+
+   test("start/stop measures elapsed time", function()
+      local timer = luamark.Timer()
+      timer.start()
+      socket.sleep(0.01)
+      local elapsed = timer.stop()
+      assert.is_near(0.01, elapsed, 0.005)
+   end)
+
+   test("elapsed returns total accumulated time", function()
+      local timer = luamark.Timer()
+      timer.start()
+      socket.sleep(0.01)
+      timer.stop()
+      timer.start()
+      socket.sleep(0.01)
+      timer.stop()
+      assert.is_near(0.02, timer.elapsed(), 0.01)
+   end)
+
+   test("reset clears accumulated time", function()
+      local timer = luamark.Timer()
+      timer.start()
+      socket.sleep(0.01)
+      timer.stop()
+      timer.reset()
+      assert.are_equal(0, timer.elapsed())
+   end)
+
+   test("start while running throws error", function()
+      local timer = luamark.Timer()
+      timer.start()
+      assert.has_error(function()
+         timer.start()
+      end, "timer.start() called while already running")
+   end)
+
+   test("stop without start throws error", function()
+      local timer = luamark.Timer()
+      assert.has_error(function()
+         timer.stop()
+      end, "timer.stop() called without start()")
+   end)
+
+   test("elapsed while running throws error", function()
+      local timer = luamark.Timer()
+      timer.start()
+      assert.has_error(function()
+         timer.elapsed()
+      end, "timer still running (missing stop())")
    end)
 end)
 

@@ -60,37 +60,3 @@ end, {
    end,
 })
 print(stats_with_setup)
-
--- ============================================================================
--- Example 3: Comparing allocation strategies
--- ============================================================================
--- Use compare_memory to compare different implementations
-
-print("\n=== Comparing allocation strategies ===")
-local results = luamark.compare_memory({
-   -- String concatenation creates many intermediate strings
-   string_concat = function()
-      local s = ""
-      for i = 1, 100 do
-         s = s .. tostring(i)
-      end
-   end,
-   -- table.concat is more memory efficient
-   table_concat = function()
-      local t = {}
-      for i = 1, 100 do
-         t[i] = tostring(i)
-      end
-      local _ = table.concat(t)
-   end,
-   preallocated = function()
-      local t = { nil, nil, nil, nil, nil, nil, nil, nil, nil, nil } -- hint size
-      for i = 1, 100 do
-         t[i] = tostring(i)
-      end
-      local _ = table.concat(t)
-   end,
-}, { rounds = 100 })
-
-print(results)
-print(luamark.render(results))

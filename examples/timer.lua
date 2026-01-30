@@ -66,9 +66,9 @@ end
 
 local function profile_fibonacci(n)
    local t = luamark.Timer()
-   t:start()
+   t.start()
    local result = fibonacci(n)
-   local elapsed = t:stop()
+   local elapsed = t.stop()
    return result, elapsed
 end
 

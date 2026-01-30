@@ -14,7 +14,7 @@ execution time and memory usage with sensible defaults and optional high-precisi
 - **Measure time and memory** with optional precision via [Chronos][chronos],
   [LuaPosix][luaposix], [LuaSocket][luasocket], or [AllocSpy][allocspy]
 - **Statistics**: median with 95% confidence intervals
-- **Standalone Timer**: `luamark.Timer()` for ad-hoc profiling outside benchmarks
+- **Standalone Timer**: `luamark.Timer()` for ad-hoc profiling outside benchmark
 - **Ready to use** with sensible defaults
 
 [chronos]: https://github.com/ldrumm/chronos
@@ -42,12 +42,14 @@ Alternatively, you can manually include [luamark.lua](src/luamark.lua) in your p
 
 ### API Overview
 
-| Function              | Input              | Returns         | `params` |
-| --------------------- | ------------------ | --------------- | -------- |
-| [`timeit`][1]         | single function    | [`Stats`][5]    | No       |
-| [`memit`][2]          | single function    | [`Stats`][5]    | No       |
-| [`compare_time`][3]   | table of functions | [`Result[]`][6] | Yes      |
-| [`compare_memory`][4] | table of functions | [`Result[]`][6] | Yes      |
+| Function              | Input              | Returns         | `params` support |
+| --------------------- | ------------------ | --------------- | ---------------- |
+| [`timeit`][1]         | single function    | [`Stats`][5]    | No               |
+| [`memit`][2]          | single function    | [`Stats`][5]    | No               |
+| [`compare_time`][3]   | table of functions | [`Result[]`][6] | Yes              |
+| [`compare_memory`][4] | table of functions | [`Result[]`][6] | Yes              |
+
+`params` lets you run benchmarks across parameter combinations (e.g., different input sizes).
 
 [1]: docs/api.md#timeit
 [2]: docs/api.md#memit
@@ -92,15 +94,37 @@ print(stats)
 
 ### Comparing Functions
 
+Basic comparison:
+
 ```lua
 local luamark = require("luamark")
 
 local results = luamark.compare_time({
-   loop = function(ctx)
+   loop = function()
+      local s = ""
+      for i = 1, 100 do s = s .. tostring(i) end
+   end,
+   table_concat = function()
+      local t = {}
+      for i = 1, 100 do t[i] = tostring(i) end
+      table.concat(t)
+   end,
+})
+
+print(luamark.render(results))
+```
+
+With parameters and setup:
+
+```lua
+local luamark = require("luamark")
+
+local results = luamark.compare_time({
+   loop = function(ctx, p)
       local s = ""
       for i = 1, #ctx.data do s = s .. ctx.data[i] end
    end,
-   table_concat = function(ctx)
+   table_concat = function(ctx, p)
       table.concat(ctx.data)
    end,
 }, {
@@ -112,60 +136,74 @@ local results = luamark.compare_time({
    end,
 })
 
-print(results)  -- compact output (bar chart)
-
-print(luamark.render(results))  -- detailed output (full table)
+print(luamark.render(results))
 ```
 
 ```text
 n=100
     Name      Rank      Ratio       Median  CI Low  CI High    Ops     Rounds
 ------------  ----  --------------  ------  ------  -------  --------  ------
-table_concat  1     █        1.00x  1.12us  1.12us  1.12us   888.9k/s    1000
-loop          2     ████████ 4.18x  4.71us  4.67us  4.79us   212.4k/s    1000
+table_concat  1     █        1.00x  1.04us  1.04us  1.04us   959.7k/s  100
+loop          2     ████████ 5.14x  5.35us  5.27us  5.5us    186.8k/s  100
 
 n=1000
-    Name      Rank       Ratio        Median    CI Low   CI High     Ops    Rounds
-------------  ----  ---------------  --------  --------  --------  -------  ------
-table_concat  1     █         1.00x  12.33us   12.29us   12.38us   81.1k/s    1000
-loop          2     ████████ 15.47x  190.83us  189.46us  192.38us  5.2k/s     1000
+    Name      Rank       Ratio        Median   CI Low   CI High     Ops    Rounds
+------------  ----  ---------------  --------  -------  --------  -------  ------
+table_concat  1     █         1.00x  10.17us   10.13us  10.17us   98.4k/s  100
+loop          2     ████████ 12.85x  130.62us  130us    132.77us  7.7k/s   100
 ```
 
 When results have overlapping confidence intervals, they share the same rank with
 an `≈` prefix (e.g., `≈1 ≈1 3`), indicating they are statistically indistinguishable.
 
-### Timer API
+### Per-Iteration Setup with Spec Hooks
 
-Control exactly what gets measured using `timer.start()` and `timer.stop()`:
+When benchmarking functions that mutate data, use `Spec.before` for per-iteration setup:
 
 ```lua
 local luamark = require("luamark")
 
 local results = luamark.compare_time({
-   table_sort = function(ctx, timer)
-      -- Copy array (not timed)
-      local copy = {}
-      for i = 1, #ctx do
-         copy[i] = ctx[i]
-      end
-
-      -- Only time the sort
-      timer.start()
-      table.sort(copy)
-      timer.stop()
-   end,
+   table_sort = {
+      fn = function(ctx, p)
+         table.sort(ctx.data)
+      end,
+      before = function(ctx, p)
+         -- Copy data before each iteration (sort mutates it)
+         ctx.data = {}
+         for i = 1, #ctx.source do
+            ctx.data[i] = ctx.source[i]
+         end
+         return ctx
+      end,
+   },
 }, {
-   setup = function()
-      local ctx = {}
-      for i = 1, 1000 do
-         ctx[i] = math.random(10000)
+   params = { n = {100, 1000} },
+   setup = function(p)
+      local source = {}
+      for i = 1, p.n do
+         source[i] = math.random(p.n * 10)
       end
-      return ctx
+      return { source = source }
    end,
 })
-```
+````
 
-If you don't use the timer, the entire function is measured (auto-timing).
+### Standalone Timer
+
+Use `luamark.Timer()` for ad-hoc profiling outside of benchmarks:
+
+```lua
+local luamark = require("luamark")
+
+local timer = luamark.Timer()
+timer.start()
+local sum = 0
+for i = 1, 1e6 do sum = sum + i end
+local elapsed = timer.stop()
+
+print(luamark.humanize_time(elapsed))  -- "4.25ms"
+```
 
 ## Technical Details
 

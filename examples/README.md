@@ -20,9 +20,14 @@ done
 
 ## Examples
 
-| File | API | Description |
-| ---- | --- | ----------- |
-| [timeit.lua](timeit.lua) | `timeit` | Benchmark execution time |
-| [memit.lua](memit.lua) | `memit` | Benchmark memory allocation |
-| [compare_functions.lua](compare_functions.lua) | `compare_time`/`compare_memory` | Compare functions with `params` |
-| [timer.lua](timer.lua) | `Timer` | Manual profiling with start/stop |
+| File                     | API                | Description                |
+| ------------------------ | ------------------ | -------------------------- |
+| [timeit.lua]             | `timeit`           | Benchmark execution time   |
+| [memit.lua]              | `memit`            | Benchmark memory usage     |
+| [compare_functions.lua]  | `compare_time/mem` | Compare multiple functions |
+| [timer.lua]              | `Timer`            | Manual profiling           |
+
+[timeit.lua]: timeit.lua
+[memit.lua]: memit.lua
+[compare_functions.lua]: compare_functions.lua
+[timer.lua]: timer.lua

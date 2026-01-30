@@ -125,54 +125,39 @@ local function warn_low_precision_clock()
    end
 end
 
--- ----------------------------------------------------------------------------
--- Timer
--- ----------------------------------------------------------------------------
-
---- Create a Timer
----@return luamark.Timer
-local function create_timer()
-   local running = false
-   local start_time = 0
-   local total = 0
-
-   return {
-      start = function()
-         if running then
-            error("timer.start() called while already running")
-         end
-         running = true
-         start_time = clock()
-      end,
-      stop = function()
-         if not running then
-            error("timer.stop() called without start()")
-         end
-         local segment = clock() - start_time
-         total = total + segment
-         running = false
-         return segment
-      end,
-      elapsed = function()
-         if running then
-            error("timer still running (missing stop())")
-         end
-         return total
-      end,
-      reset = function()
-         total = 0
-         running = false
-      end,
-   }
-end
-
+---@alias MeasureOnce fun(fn: function, ctx: any, params: table):number
+---@alias Target fun()|{[string]: fun()|luamark.Spec} A function or table of named functions/Specs to benchmark.
 ---@alias ParamValue string|number|boolean Allowed parameter value types.
 
---- Function to benchmark (single API). Arguments can be omitted from the right.
----@alias luamark.BenchmarkFn fun(ctx?: any, timer?: luamark.Timer)
+-- MeasureOnce functions accept fn, ctx, params to avoid closure overhead.
+-- Calling fn(ctx, params) directly eliminates ~64 byte allocation per call.
+---@type MeasureOnce
+local function measure_time_once(fn, ctx, params)
+   local start = clock()
+   fn(ctx, params)
+   return clock() - start
+end
 
---- Function to benchmark (suite API). Arguments can be omitted from the right.
----@alias luamark.SuiteBenchmarkFn fun(ctx?: any, timer?: luamark.Timer, params?: table)
+---@type MeasureOnce
+local measure_memory_once
+do
+   local is_allocspy_installed, allocspy = pcall(require, "allocspy")
+   if is_allocspy_installed then
+      measure_memory_once = function(fn, ctx, params)
+         collectgarbage("collect")
+         allocspy.enable()
+         fn(ctx, params)
+         return allocspy.disable() / BYTES_TO_KB
+      end
+   else
+      measure_memory_once = function(fn, ctx, params)
+         collectgarbage("collect")
+         local start = collectgarbage("count")
+         fn(ctx, params)
+         return collectgarbage("count") - start
+      end
+   end
+end
 
 -- ----------------------------------------------------------------------------
 -- Statistics
@@ -434,7 +419,7 @@ local function humanize(value, unit_type)
 end
 
 --- Format statistical measurements into a readable string.
----@param stats table Statistical measurements to format.
+---@param stats table The statistical measurements to format.
 ---@param unit default_unit
 ---@return string # A formatted string representing the statistical metrics.
 local function stats_tostring(stats, unit)
@@ -722,62 +707,71 @@ local function math_round(num, precision)
    return math_max(rounded, 10 ^ -precision)
 end
 
---- Measure execution time or memory for a function over multiple iterations.
---- Return total measurement and per-iteration measurement (rounded).
----@alias TimerMeasure fun(fn: function, iterations: integer, timer: luamark.Timer, ctx: any, params: table?): number, number
+---@alias Measure fun(fn: function, iterations: integer, setup?: function, teardown?: function, get_ctx?: function, params?: table): number, number
 
---- Build a timer-based measurement function.
---- Runs fn(ctx, timer, params) for N iterations, checking if timer was used.
---- If timer was used (manual timing), returns accumulated time.
---- If timer was not used (auto-timing), measures the entire function.
----@param precision integer Decimal precision for rounding.
----@param is_time boolean True for time measurement, false for memory.
----@return TimerMeasure
-local function build_timer_measure(precision, is_time)
-   return function(fn, iterations, timer, ctx, params)
-      timer.reset()
-
-      if is_time then
-         local start = clock()
-         for _ = 1, iterations do
-            fn(ctx, timer, params)
-         end
-         local auto_total = clock() - start
-
-         local total = timer.elapsed()
-         if total > 0 then
-            return total, math_round(total / iterations, precision)
-         end
-         return auto_total, math_round(auto_total / iterations, precision)
-      end
-
+---@param measure_once MeasureOnce
+---@param precision integer
+---@return Measure
+local function build_measure(measure_once, precision)
+   return function(fn, iterations, setup, teardown, get_ctx, params)
       local total = 0
+      local ctx = get_ctx and get_ctx() or nil
       for _ = 1, iterations do
-         collectgarbage("collect")
-         local start = collectgarbage("count")
-         fn(ctx, timer, params)
-         total = total + (collectgarbage("count") - start)
+         if setup then
+            setup()
+         end
+
+         if get_ctx then
+            ctx = get_ctx()
+         end
+         total = total + measure_once(fn, ctx, params)
+
+         if teardown then
+            teardown()
+         end
       end
-      return total / BYTES_TO_KB, math_round(total / iterations / BYTES_TO_KB, precision)
+      return total, math_round(total / iterations, precision)
    end
 end
 
-local measure_time = build_timer_measure(clock_precision, true)
-local measure_memory = build_timer_measure(MEMORY_PRECISION, false)
+---@param precision integer
+---@return Measure
+local function build_measure_time(precision)
+   local slow_path = build_measure(measure_time_once, precision)
+   return function(fn, iterations, setup, teardown, get_ctx, params)
+      -- Fast path: 2 clock() calls total instead of 2N when no hooks need to run
+      -- between iterations. Reduces timing overhead for fast functions.
+      if not setup and not teardown then
+         local ctx = get_ctx and get_ctx() or nil
+         local t1 = clock()
+         for _ = 1, iterations do
+            fn(ctx, params)
+         end
+         local total = clock() - t1
+         return total, math_round(total / iterations, precision)
+      end
+
+      return slow_path(fn, iterations, setup, teardown, get_ctx, params)
+   end
+end
+
+local measure_time = build_measure_time(clock_precision)
+local measure_memory = build_measure(measure_memory_once, MEMORY_PRECISION)
 
 local ZERO_TIME_SCALE = 100
 
----@param fn function Function to benchmark.
----@param timer luamark.Timer Timer object for manual timing.
----@param ctx any Context from setup.
----@param params table? Parameter table (nil in single mode).
+---@param fn function The function to benchmark.
+---@param setup? function Function executed before each iteration.
+---@param teardown? function Function executed after each iteration.
+---@param get_ctx function Function that returns current iteration context.
+---@param params table Parameter table to pass to fn.
 ---@return integer # Number of iterations per round.
-local function calibrate_iterations(fn, timer, ctx, params)
+local function calibrate_iterations(fn, setup, teardown, get_ctx, params)
    local min_time = get_min_clocktime() * CALIBRATION_PRECISION
    local iterations = 1
 
    for _ = 1, MAX_CALIBRATION_ATTEMPTS do
-      local total_time = measure_time(fn, iterations, timer, ctx, params)
+      local total_time = measure_time(fn, iterations, setup, teardown, get_ctx, params)
       if total_time >= min_time then
          break
       end
@@ -947,44 +941,107 @@ local function build_stats_result(samples, rounds, iterations, timestamp, unit)
    return stats
 end
 
+-- Sentinel value to indicate "no context" without using nil.
+-- Required because suite mode needs to distinguish "no ctx passed" from "ctx is nil".
+-- Using varargs with select("#", ...) caused memory allocation overhead.
+local NIL_CTX = {}
+
+--- Create a hook invoker that optionally appends params to all calls.
+--- In single mode: passes ctx only if provided (setup gets no args, others get ctx).
+--- In suite mode: passes (params) when ctx is NIL_CTX, or (ctx, params) otherwise.
+---@param single_mode boolean? When true, calls hooks without params.
+---@param params table Parameter table to append in suite mode.
+---@return function invoke Hook invoker function.
+local function make_invoke(single_mode, params)
+   if single_mode then
+      return function(hook, ctx)
+         if not ctx or ctx == NIL_CTX then
+            return hook()
+         end
+         return hook(ctx)
+      end
+   end
+   -- Suite mode: use sentinel to detect "no ctx" (avoids varargs allocation overhead)
+   return function(hook, ctx)
+      if ctx == NIL_CTX then
+         return hook(params)
+      end
+      return hook(ctx, params)
+   end
+end
+
 --- Run a benchmark on a function using a specified measurement method.
----@param fn function Function to benchmark with signature fn(ctx, timer, params).
----@param timer_measure TimerMeasure Measurement function.
----@param disable_gc boolean Controls garbage collection during benchmark.
+---@param fn luamark.Fn Function to benchmark.
+---@param measure Measure Measurement function (e.g., measure_time or measure_memory).
+---@param suspend_gc boolean Controls garbage collection during benchmark.
 ---@param unit default_unit Measurement unit.
 ---@param rounds? number Number of rounds.
 ---@param time? number Target duration in seconds.
 ---@param setup? function Runs once before benchmark, returns context.
 ---@param teardown? function Runs once after benchmark.
 ---@param params? table Parameter values for this run (nil for single mode).
+---@param before? function Per-iteration setup (from Spec), returns iteration context.
+---@param after? function Per-iteration teardown (from Spec).
+---@param single_mode? boolean When true, hooks receive no params argument.
 ---@return luamark.Stats
 local function single_benchmark(
    fn,
-   timer_measure,
-   disable_gc,
+   measure,
+   suspend_gc,
    unit,
    rounds,
    time,
    setup,
    teardown,
-   params
+   params,
+   before,
+   after,
+   single_mode
 )
    validate_benchmark_args(fn, rounds, time, setup, teardown)
    warn_low_precision_clock()
 
+   params = params or {}
+   local invoke = make_invoke(single_mode, params)
+
    local ctx
    if setup then
-      ctx = setup(params)
+      ctx = invoke(setup, NIL_CTX)
    end
 
-   local timer = create_timer()
+   -- Using a closure avoids creating a new function per iteration.
+   local iteration_ctx = ctx
+   local function get_ctx()
+      return iteration_ctx
+   end
+
+   -- Per-iteration setup from Spec.before.
+   -- The hook can return a new context; otherwise the previous context is preserved.
+   local iteration_setup
+   if before then
+      iteration_setup = function()
+         iteration_ctx = ctx
+         iteration_ctx = invoke(before, iteration_ctx) or iteration_ctx
+      end
+   end
+
+   -- Per-iteration teardown from Spec.after.
+   local iteration_teardown
+   if after then
+      iteration_teardown = function()
+         invoke(after, iteration_ctx)
+      end
+   end
 
    -- For time benchmarks, calibrate iterations for statistical accuracy.
    -- Calibration also serves as warmup (JIT compiled, caches hot).
    -- For memory benchmarks, skip calibration (iterations don't improve accuracy
    -- and would cause hangs with low-precision clocks due to GC overhead).
    -- Memory measurement is unaffected by JIT/cache warmup.
-   local iterations = disable_gc and calibrate_iterations(fn, timer, ctx, params) or 1
+   local iterations = 1
+   if suspend_gc then
+      iterations = calibrate_iterations(fn, iteration_setup, iteration_teardown, get_ctx, params)
+   end
 
    local timestamp = os.date("!%Y-%m-%d %H:%M:%SZ") --[[@as string]]
    local samples = {}
@@ -992,7 +1049,7 @@ local function single_benchmark(
    local total_duration = 0
    local duration
 
-   if disable_gc then
+   if suspend_gc then
       collectgarbage("stop")
    end
 
@@ -1001,12 +1058,15 @@ local function single_benchmark(
          completed_rounds = completed_rounds + 1
          local start = clock()
 
-         local _, iteration_measure = timer_measure(fn, iterations, timer, ctx, params)
+         local _, iteration_measure =
+            measure(fn, iterations, iteration_setup, iteration_teardown, get_ctx, params)
          samples[completed_rounds] = iteration_measure
 
          duration = clock() - start
          total_duration = total_duration + duration
          if completed_rounds == 1 and not rounds and not time then
+            -- Wait 1 round to gather a sample of loop duration,
+            -- as memit can slow down the loop significantly because of the collectgarbage calls.
             rounds, time = calibrate_stop(duration)
          end
       until (time and total_duration >= (time - duration))
@@ -1017,7 +1077,7 @@ local function single_benchmark(
    collectgarbage("restart")
 
    if teardown then
-      local teardown_ok, teardown_err = pcall(teardown, ctx, params)
+      local teardown_ok, teardown_err = pcall(invoke, teardown, ctx)
       if not teardown_ok and bench_ok then
          error(teardown_err, 0)
       end
@@ -1028,6 +1088,39 @@ local function single_benchmark(
    end
 
    return build_stats_result(samples, completed_rounds, iterations, timestamp, unit)
+end
+
+--- Function to benchmark (single API). Arguments can be omitted from the right.
+---@alias luamark.Fn fun(ctx: any, p: table)
+
+--- Per-iteration setup; returns iteration context.
+---@alias luamark.before fun(ctx: any, p: table): any
+
+--- Per-iteration setup; returns iteration context.
+---@alias luamark.after fun(ctx: any, p: table)
+
+--- Per-function benchmark specification with optional lifecycle hooks.
+--- Use when comparing functions that need different setup/teardown.
+--- Unlike Options.setup/teardown (run once), Spec hooks run each iteration.
+---@class luamark.Spec
+---@field fn luamark.Fn  Benchmark function; receives iteration context and params.
+---@field before? luamark.before Per-iteration setup; returns iteration context.
+---@field after? luamark.after Per-iteration setup; returns iteration context.
+
+--- Parse a benchmark specification into its components.
+---@param spec luamark.Fn|luamark.Spec Function or Spec table.
+---@return luamark.Fn fn Benchmark function.
+---@return luamark.before ? before Per-iteration setup.
+---@return luamark.after? after Per-iteration teardown.
+local function parse_spec(spec)
+   if type(spec) == "function" then
+      return spec
+   end
+   assert(type(spec) == "table", "spec must be a function or table")
+   assert(type(spec.fn) == "function", "spec.fn must be a function")
+   assert(not spec.before or type(spec.before) == "function", "spec.before must be a function")
+   assert(not spec.after or type(spec.after) == "function", "spec.after must be a function")
+   return spec.fn, spec.before, spec.after
 end
 
 -- ----------------------------------------------------------------------------
@@ -1151,13 +1244,13 @@ local function rank_results(results, param_names)
 end
 
 --- Run benchmarks on a table of functions with optional params.
----@param funcs table<string, function> Table of named functions to benchmark.
----@param timer_measure TimerMeasure Measurement function.
----@param disable_gc boolean Controls garbage collection during benchmark.
+---@param funcs table<string, function|luamark.Spec> Table of named functions or Specs to benchmark.
+---@param measure Measure Measurement function.
+---@param suspend_gc boolean Controls garbage collection during benchmark.
 ---@param unit default_unit Measurement unit.
 ---@param opts luamark.SuiteOptions Benchmark options.
 ---@return luamark.Result[]
-local function benchmark_suite(funcs, timer_measure, disable_gc, unit, opts)
+local function benchmark_suite(funcs, measure, suspend_gc, unit, opts)
    opts = opts or {}
    local params_list = expand_params(opts.params)
    local results = {}
@@ -1165,20 +1258,22 @@ local function benchmark_suite(funcs, timer_measure, disable_gc, unit, opts)
    local names = sorted_keys(funcs)
    for j = 1, #names do
       local name = names[j]
-      local fn = funcs[name]
-      assert(type(fn) == "function", "funcs['" .. name .. "'] must be a function")
+      local fn, before, after = parse_spec(funcs[name])
       for i = 1, #params_list do
          local p = params_list[i]
          local stats = single_benchmark(
             fn,
-            timer_measure,
-            disable_gc,
+            measure,
+            suspend_gc,
             unit,
             opts.rounds,
             opts.time,
             opts.setup,
             opts.teardown,
-            p
+            p,
+            before,
+            after,
+            false -- suite mode: hooks receive params
          )
          -- Flatten: merge params and stats into single row
          local row = { name = name }
@@ -1260,7 +1355,7 @@ end
 
 --- Benchmark a single function for execution time.
 --- Time is represented in seconds.
----@param fn luamark.BenchmarkFn Function to benchmark.
+---@param fn luamark.Fn Function to benchmark.
 ---@param opts? luamark.Options Benchmark configuration.
 ---@return luamark.Stats Benchmark statistics.
 function luamark.timeit(fn, opts)
@@ -1275,13 +1370,17 @@ function luamark.timeit(fn, opts)
       opts.rounds,
       opts.time,
       opts.setup,
-      opts.teardown
+      opts.teardown,
+      nil, -- params
+      nil, -- before
+      nil, -- after
+      true -- single_mode
    )
 end
 
 --- Benchmark a single function for memory usage.
 --- Memory is represented in kilobytes.
----@param fn luamark.BenchmarkFn Function to benchmark.
+---@param fn luamark.Fn Function to benchmark.
 ---@param opts? luamark.Options Benchmark configuration.
 ---@return luamark.Stats Benchmark statistics.
 function luamark.memit(fn, opts)
@@ -1296,14 +1395,18 @@ function luamark.memit(fn, opts)
       opts.rounds,
       opts.time,
       opts.setup,
-      opts.teardown
+      opts.teardown,
+      nil, -- params
+      nil, -- before
+      nil, -- after
+      true -- single_mode
    )
 end
 
 --- Compare multiple functions for execution time.
 --- Time is represented in seconds.
 --- Results are sorted by parameter group, then by rank (fastest first) within each group.
----@param funcs table<string, luamark.SuiteBenchmarkFn> Table of named functions to benchmark.
+---@param funcs table<string, luamark.Fn|luamark.Spec> Table of named functions or Specs to benchmark.
 ---@param opts? luamark.SuiteOptions Benchmark configuration with optional params.
 ---@return luamark.Result[] Sorted array of benchmark results with ranking.
 function luamark.compare_time(funcs, opts)
@@ -1317,7 +1420,7 @@ end
 --- Compare multiple functions for memory usage.
 --- Memory is represented in kilobytes.
 --- Results are sorted by parameter group, then by rank (fastest first) within each group.
----@param funcs table<string, luamark.SuiteBenchmarkFn> Table of named functions to benchmark.
+---@param funcs table<string, luamark.Fn|luamark.Spec> Table of named functions or Specs to benchmark.
 ---@param opts? luamark.SuiteOptions Benchmark configuration with optional params.
 ---@return luamark.Result[] Sorted array of benchmark results with ranking.
 function luamark.compare_memory(funcs, opts)
@@ -1353,12 +1456,47 @@ function luamark.humanize_count(n)
 end
 
 ---@class luamark.Timer
----@field start fun() Start timing. Error if already running.
----@field stop fun(): number Stop timing and return elapsed seconds. Error if not running.
----@field elapsed fun(): number Get total elapsed time. Error if still running.
+---@field start fun() Start timing.
+---@field stop fun(): number Stop timing and return elapsed seconds.
+---@field elapsed fun(): number Get total elapsed time.
 ---@field reset fun() Reset timer for reuse.
 
-luamark.Timer = create_timer
+--- Create a standalone Timer for profiling outside of benchmarks.
+--- @return luamark.Timer
+function luamark.Timer()
+   local running = false
+   local start_time = 0
+   local total = 0
+
+   return {
+      start = function()
+         if running then
+            error("timer.start() called while already running")
+         end
+         running = true
+         start_time = clock()
+      end,
+      stop = function()
+         if not running then
+            error("timer.stop() called without start()")
+         end
+         local segment = clock() - start_time
+         total = total + segment
+         running = false
+         return segment
+      end,
+      elapsed = function()
+         if running then
+            error("timer still running (missing stop())")
+         end
+         return total
+      end,
+      reset = function()
+         total = 0
+         running = false
+      end,
+   }
+end
 
 --- Unload modules matching a Lua pattern from package.loaded.
 --- Useful for benchmarking module load times or resetting state.
@@ -1385,9 +1523,10 @@ if rawget(_G, "_TEST") then
       bootstrap_ci = bootstrap_ci,
       math_median = math_median,
       calculate_stats = calculate_stats,
-      clock = clock,
       get_min_clocktime = get_min_clocktime,
       humanize = humanize,
+      measure_memory = measure_memory,
+      measure_time = measure_time,
       rank_results = rank_results,
    }
 end
