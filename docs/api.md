@@ -452,6 +452,8 @@ Accepts either a single [`Stats`](#stats) object (from [`timeit`](#timeit)/[`mem
 or an array of [`Result`](#result) objects
 (from [`compare_time`](#compare_time)/[`compare_memory`](#compare_memory)).
 
+Mixed results (time and memory) are automatically grouped by unit.
+
 @_param_ `input` — Single [`Stats`](#stats) object or [`Result`](#result) array.
 
 @_param_ `short` — Output format. Ignored for single Stats.

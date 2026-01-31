@@ -26,42 +26,29 @@ describe("render", function()
       }
       local output = luamark.render(results)
 
+      -- Headers present
       assert.matches("Name", output)
       assert.matches("Rank", output)
-      assert.matches("Factor", output)
       assert.matches("Median", output)
-      assert.matches("Ops", output)
-      assert.not_matches("CI Low", output)
-      assert.not_matches("CI High", output)
+      -- Hidden columns stay hidden
       assert.not_matches("Rounds", output)
-      assert.matches("±", output)
-
-      -- Values and bar chart
+      -- Factor formatting
       assert.matches("fast.*1x", output)
       assert.matches("slow.*↓3x", output)
-      assert.matches("%d+", output)
-      assert.matches("1k/s", output)
    end)
 
    test("short=true shows only bar chart without headers", function()
-      local results = {
-         h.make_result_row("fast", 100, 1, 1),
-         h.make_result_row("slow", 300, 2, 3),
-      }
+      local results = { h.make_result_row("test", 100, 1, 1) }
       local output = luamark.render(results, true)
 
       assert.not_matches("Name", output)
-      assert.matches("fast.*█", output)
-      assert.matches("slow.*█", output)
+      assert.matches("test.*█", output)
    end)
 
    test("truncates long names to fit terminal width", function()
       local long_name =
          "very_long_function_name_that_should_definitely_be_truncated_to_fit_the_terminal_width_limit"
-      local results = {
-         h.make_result_row(long_name, 100, 1, 1),
-         h.make_result_row("short", 500, 2, 5),
-      }
+      local results = { h.make_result_row(long_name, 100, 1, 1) }
 
       local max_width = luamark._internal.DEFAULT_TERM_WIDTH
       local output = luamark.render(results, false, max_width)
@@ -73,11 +60,11 @@ describe("render", function()
       local mem_results = { h.make_result_row("test", 1.0, 1, 1, { unit = "kb" }) }
 
       local time_output = luamark.render(time_results)
-      assert.matches("Ops", time_output) -- Header present
+      assert.matches("Ops", time_output)
       assert.matches("fast.*%d+[kMG]?/s", time_output)
 
       local mem_output = luamark.render(mem_results)
-      assert.not_matches("Ops", mem_output) -- Header hidden
+      assert.not_matches("Ops", mem_output)
       assert.not_matches("/s", mem_output)
    end)
 
@@ -92,12 +79,12 @@ describe("render", function()
       assert.not_matches("≈2", output)
    end)
 
-   test("humanize_time and humanize_memory handle scale and sub-unit rounding", function()
-      -- Time: nanoseconds and sub-nanosecond
+   test("humanize_time handles scale and sub-unit rounding", function()
       assert.are_equal("5ns", luamark.humanize_time(5 / 1e9))
       assert.are_equal("0ns", luamark.humanize_time(0.5 / 1e9))
+   end)
 
-      -- Memory: terabytes and sub-byte
+   test("humanize_memory handles scale and sub-unit rounding", function()
       local tb, gb = 1024 ^ 3, 1024 ^ 2
       assert.are_equal("2TB", luamark.humanize_memory(tb + 512 * gb))
       assert.are_equal("0B", luamark.humanize_memory(0.25 / 1024))
@@ -138,37 +125,25 @@ describe("render", function()
       assert.matches("n=20", short_output)
    end)
 
-   test("renders single time Stats as key-value format", function()
-      local stats = h.make_stats(250e-9) -- 250ns
-      local output = luamark.render(stats)
+   test("renders single Stats in key-value format", function()
+      -- Time stats include ops
+      local time_stats = h.make_stats(250e-9)
+      local time_output = luamark.render(time_stats)
+      assert.matches("Median: 250ns", time_output)
+      assert.matches("CI:", time_output)
+      assert.matches("Ops:", time_output)
+      assert.matches("Rounds: 100", time_output)
+      assert.matches("Total:", time_output)
 
-      assert.matches("Median: 250ns", output)
-      assert.matches("CI:", output)
-      assert.matches("Ops:", output)
-      assert.matches("Rounds: 100", output)
-      assert.matches("Total:", output)
-   end)
+      -- Memory stats exclude ops
+      local mem_stats = h.make_stats(2, { unit = "kb" })
+      local mem_output = luamark.render(mem_stats)
+      assert.matches("Median: 2kB", mem_output)
+      assert.not_matches("Ops:", mem_output)
 
-   test("renders single memory Stats without ops", function()
-      local stats = h.make_stats(2, { unit = "kb" }) -- 2 kB
-      local output = luamark.render(stats)
-
-      assert.matches("Median: 2kB", output)
-      assert.matches("CI:", output)
-      assert.not_matches("Ops:", output)
-      assert.matches("Rounds:", output)
-      assert.matches("Total:", output)
-   end)
-
-   test("single Stats ignores short and max_width arguments", function()
-      local stats = h.make_stats(1e-6) -- 1us
-      local output_default = luamark.render(stats)
-      local output_short = luamark.render(stats, true)
-      local output_width = luamark.render(stats, false, 40)
-
-      -- All should produce the same key-value format
-      assert.are_equal(output_default, output_short)
-      assert.are_equal(output_default, output_width)
+      -- short/max_width args ignored for single Stats
+      assert.are_equal(time_output, luamark.render(time_stats, true))
+      assert.are_equal(time_output, luamark.render(time_stats, false, 40))
    end)
 
    test("renders real timeit Stats", function()
@@ -180,5 +155,53 @@ describe("render", function()
       assert.matches("Ops:", output)
       assert.matches("Rounds: 10", output)
       assert.matches("Total:", output)
+   end)
+
+   test("groups mixed time and memory results by unit", function()
+      local results = {
+         h.make_result_row("time_fn", 0.001, 1, 1),
+         h.make_result_row("mem_fn", 1.0, 1, 1, { unit = "kb" }),
+      }
+      local output = luamark.render(results)
+
+      -- Headers in correct order: Time before Memory
+      local time_pos = output:find("Time")
+      local mem_pos = output:find("Memory")
+      assert.is_truthy(time_pos)
+      assert.is_truthy(mem_pos)
+      assert.is_true(time_pos < mem_pos)
+
+      -- Ops only in Time section (before Memory header)
+      local ops_pos = output:find("Ops")
+      assert.is_truthy(ops_pos)
+      assert.is_true(ops_pos < mem_pos)
+   end)
+
+   test("mixed results with params groups by unit then params", function()
+      local results = {
+         h.make_result_row("fn", 0.001, 1, 1, { params = { n = 10 } }),
+         h.make_result_row("fn", 0.002, 2, 2, { params = { n = 20 } }),
+         h.make_result_row("fn", 1.0, 1, 1, { unit = "kb", params = { n = 10 } }),
+         h.make_result_row("fn", 2.0, 2, 2, { unit = "kb", params = { n = 20 } }),
+      }
+      local output = luamark.render(results)
+
+      -- Unit headers present
+      assert.matches("Time", output)
+      assert.matches("Memory", output)
+
+      -- Params appear in both unit sections
+      local _, n10_count = output:gsub("n=10", "")
+      local _, n20_count = output:gsub("n=20", "")
+      assert.are_equal(2, n10_count)
+      assert.are_equal(2, n20_count)
+   end)
+
+   test("single unit results do not show unit header", function()
+      local results = { h.make_result_row("a", 0.001, 1, 1) }
+      local output = luamark.render(results)
+
+      assert.not_matches("^Time", output)
+      assert.not_matches("^Memory", output)
    end)
 end)

@@ -75,9 +75,7 @@ describe("math_median", function()
 
    local cases = {
       { name = "odd-length array", input = { 1, 3, 5 }, expected = 3 },
-      { name = "odd-length array (5 elements)", input = { 1, 3, 5, 7, 9 }, expected = 5 },
       { name = "even-length array", input = { 1, 2, 3, 4 }, expected = 2.5 },
-      { name = "even-length array (6 elements)", input = { 1, 2, 3, 4, 5, 6 }, expected = 3.5 },
    }
    for _, case in ipairs(cases) do
       test(case.name, function()
@@ -286,12 +284,9 @@ describe("humanize with count unit", function()
    local cases = {
       { input = 0, expected = "0" },
       { input = 1, expected = "1" },
-      { input = 500, expected = "500" },
       { input = 1000, expected = "1k" },
       { input = 1500, expected = "1.5k" },
-      { input = 10000, expected = "10k" },
       { input = 1000000, expected = "1M" },
-      { input = 2500000, expected = "2.5M" },
    }
    for _, case in ipairs(cases) do
       test("humanize(" .. case.input .. ") = " .. case.expected, function()

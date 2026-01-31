@@ -152,13 +152,7 @@ for _, clock_name in ipairs(h.CLOCKS) do
       end)
 
       test("memit: does not include ops field", function()
-         local stats = luamark.memit(function()
-            local t = {}
-            for i = 1, 10 do
-               t[i] = i
-            end
-         end, { rounds = 10 })
-
+         local stats = luamark.memit(h.noop, { rounds = 10 })
          assert.is_nil(stats.ops)
       end)
 

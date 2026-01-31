@@ -44,6 +44,10 @@ local config = {
    time = 1,
 }
 
+local TIME = "s"
+local MEMORY = "kb"
+local COUNT = "count"
+
 ---@generic K, V
 ---@param tbl table<K, V>
 ---@return K[]
@@ -163,23 +167,20 @@ end
 -- Statistics
 -- ----------------------------------------------------------------------------
 
---- Calculate median of a sorted array.
----@param sorted number[] Sorted array of numbers.
+---@param sorted_samples number[]
 ---@return number
-local function math_median(sorted)
-   local n = #sorted
+local function math_median(sorted_samples)
+   local n = #sorted_samples
    local mid = math_floor(n / 2)
    if n % 2 == 0 then
-      return (sorted[mid] + sorted[mid + 1]) / 2
+      return (sorted_samples[mid] + sorted_samples[mid + 1]) / 2
    end
-   return sorted[mid + 1]
+   return sorted_samples[mid + 1]
 end
 
---- Calculate median by reusing a pre-allocated array.
---- Sorts the array in place and computes median.
----@param bootstrap number[] Pre-allocated array to fill with resampled values.
----@param samples number[] Source samples to resample from.
----@param n integer Number of samples.
+---@param bootstrap number[]
+---@param samples number[]
+---@param n integer
 ---@return number
 local function resample_median(bootstrap, samples, n)
    for j = 1, n do
@@ -189,9 +190,9 @@ local function resample_median(bootstrap, samples, n)
    return math_median(bootstrap)
 end
 
---- Calculate 95% confidence interval for median using bootstrap resampling.
----@param samples number[] Raw samples (will be sorted in place).
----@param n_resamples integer Number of bootstrap resamples.
+--- Calculate 95% CI for median using bootstrap resampling.
+---@param samples number[]
+---@param n_resamples integer
 ---@return number lower, number upper
 local function bootstrap_ci(samples, n_resamples)
    local n = #samples
@@ -290,11 +291,13 @@ local COUNT_UNITS = {
    { "", 1, "%.1f" },
 }
 
-local UNIT_TABLES = {
-   s = TIME_UNITS,
-   kb = MEMORY_UNITS,
-   count = COUNT_UNITS,
+local UNITS = {
+   [TIME] = { label = "Time", scales = TIME_UNITS },
+   [MEMORY] = { label = "Memory", scales = MEMORY_UNITS },
+   [COUNT] = { scales = COUNT_UNITS },
 }
+
+local RENDER_UNITS = { TIME, MEMORY }
 
 local BAR_CHAR = "█"
 local BAR_MAX_WIDTH = 20
@@ -328,14 +331,13 @@ local function trim_zeroes(str)
    return (str:gsub("%.?0+$", ""))
 end
 
---- Count display width (UTF-8 aware). Counts characters, not bytes.
 ---@param str string
 ---@return integer
-local function display_width(str)
-   -- Count bytes that are NOT UTF-8 continuation bytes (0x80-0xBF)
+local function utf8_width(str)
    local width = 0
    for i = 1, #str do
       local byte = string.byte(str, i)
+      -- Skip UTF-8 continuation bytes (0x80-0xBF)
       if byte < 0x80 or byte >= 0xC0 then
          width = width + 1
       end
@@ -347,21 +349,21 @@ end
 ---@param width integer
 ---@return string
 local function align_left(str, width)
-   return str .. string.rep(" ", width - display_width(str))
+   return str .. string.rep(" ", width - utf8_width(str))
 end
 
 ---@param str string
 ---@param width integer
 ---@return string
 local function align_right(str, width)
-   return string.rep(" ", width - display_width(str)) .. str
+   return string.rep(" ", width - utf8_width(str)) .. str
 end
 
 ---@param str string
 ---@param width integer
 ---@return string
 local function center(str, width)
-   local total_padding = math_max(0, width - display_width(str))
+   local total_padding = math_max(0, width - utf8_width(str))
    local left_padding = math_floor(total_padding / 2)
    local right_padding = total_padding - left_padding
    return string.rep(" ", left_padding) .. str .. string.rep(" ", right_padding)
@@ -386,12 +388,11 @@ local function truncate_name(name, max_len)
    return name:sub(1, max_len - #ELLIPSIS) .. ELLIPSIS
 end
 
---- Format a value to a human-readable string with appropriate unit suffix.
 ---@param value number Value to format.
 ---@param unit_type default_unit Unit type: "s" (time), "kb" (memory), or "count".
 ---@return string
 local function humanize(value, unit_type)
-   local units = UNIT_TABLES[unit_type]
+   local units = UNITS[unit_type].scales
 
    for i = 1, #units do
       local symbol, threshold, fmt = units[i][1], units[i][2], units[i][3]
@@ -403,7 +404,6 @@ local function humanize(value, unit_type)
    return "0" .. units[#units][1]
 end
 
---- Format median with optional margin (hidden when margin rounds to zero).
 ---@param median number
 ---@param margin number
 ---@param unit default_unit
@@ -416,16 +416,14 @@ local function format_median(median, margin, unit)
    return humanize(median, unit) .. " ± " .. margin_str
 end
 
---- Format statistical measurements into a readable string.
----@param stats table The statistical measurements to format.
+---@param stats table
 ---@param unit default_unit
----@return string # A formatted string representing the statistical metrics.
+---@return string
 local function stats_tostring(stats, unit)
    return format_median(stats.median, stats.ci_margin, unit)
 end
 
---- Format a single Stats object as a multi-line key-value string.
----@param stats luamark.Stats Single stats object from timeit/memit.
+---@param stats luamark.Stats
 ---@return string
 local function render_stats(stats)
    local unit = stats.unit
@@ -440,19 +438,16 @@ local function render_stats(stats)
          .. ")",
    }
    if stats.ops then
-      lines[#lines + 1] = "Ops: " .. humanize(stats.ops, "count") .. "/s"
+      lines[#lines + 1] = "Ops: " .. humanize(stats.ops, COUNT) .. "/s"
    end
    lines[#lines + 1] = "Rounds: " .. stats.rounds
    lines[#lines + 1] = "Total: " .. humanize(stats.total, unit)
    return table.concat(lines, "\n")
 end
 
---- Format factor value with direction arrow.
---- - 1x = baseline (no arrow)
---- - ↑Nx = N times faster than baseline
---- - ↓Nx = N times slower than baseline
----@param factor number|nil Factor relative to baseline.
----@return string Formatted factor string (e.g., "1x", "↑7.14x", "↓2.5x").
+--- Format factor with arrow: 1x (baseline), ↑Nx (faster), ↓Nx (slower).
+---@param factor number|nil
+---@return string
 local function format_factor(factor)
    if not factor then
       return ""
@@ -466,7 +461,6 @@ local function format_factor(factor)
    end
 end
 
---- Format stats into display strings for table rendering.
 ---@param stats luamark.Stats|luamark.Result
 ---@return table<string, string>
 local function format_row(stats)
@@ -483,31 +477,29 @@ local function format_row(stats)
       rank = rank_str,
       factor = format_factor(stats.factor),
       median = format_median(stats.median, stats.ci_margin, unit),
-      ops = stats.ops and (humanize(stats.ops, "count") .. "/s") or "",
+      ops = stats.ops and (humanize(stats.ops, COUNT) .. "/s") or "",
    }
 end
 
----Calculate column widths based on header labels and row content.
 ---@param rows table[]
 ---@return integer[]
 local function calculate_column_widths(rows)
    local widths = {}
    for col, header in ipairs(SUMMARIZE_HEADERS) do
-      local max_width = display_width(HEADER_LABELS[header])
+      local max_width = utf8_width(HEADER_LABELS[header])
       for row = 1, #rows do
-         max_width = math_max(max_width, display_width(rows[row][header] or ""))
+         max_width = math_max(max_width, utf8_width(rows[row][header] or ""))
       end
       widths[col] = max_width
    end
    return widths
 end
 
----Truncate names to fit within terminal width (for plain format).
----Mutates rows and widths in place.
+--- Mutates rows and widths in place.
 ---@param rows table[]
 ---@param widths integer[]
 ---@param max_width integer
-local function fit_names(rows, widths, max_width)
+local function fit_names_inplace(rows, widths, max_width)
    local other_width = 0
    for i = 2, #SUMMARIZE_HEADERS do
       other_width = other_width + widths[i]
@@ -525,22 +517,18 @@ local function fit_names(rows, widths, max_width)
    end
 end
 
----Build combined bar + factor label (e.g., "█████ 1.00x")
----Bar is padded to fixed width so factor labels align.
----@param factor_str string Formatted factor string (e.g., "1.00x", "↑7.14x")
----@param bar_width integer Display width of the bar (number of █ characters)
----@param max_factor_width integer Max display width of factor strings (for alignment)
+---@param factor_str string
+---@param bar_width integer
+---@param max_factor_width integer
 ---@return string
 local function build_factor_bar(factor_str, bar_width, max_factor_width)
    local bar = string.rep(BAR_CHAR, bar_width)
    local padded_bar = bar .. string.rep(" ", EMBEDDED_BAR_WIDTH - bar_width)
-   -- Use display_width for UTF-8 aware padding (arrows are multi-byte)
-   local padded_factor = string.rep(" ", max_factor_width - display_width(factor_str)) .. factor_str
+   -- Use utf8_width for UTF-8 aware padding (arrows are multi-byte)
+   local padded_factor = string.rep(" ", max_factor_width - utf8_width(factor_str)) .. factor_str
    return padded_bar .. " " .. padded_factor
 end
 
----Render compact bar chart.
----Bars are scaled by median (smaller bar = faster).
 ---@param rows {name: string, factor: string, median: string, median_value: number}[]
 ---@param max_width? integer
 ---@return string[]
@@ -554,8 +542,8 @@ local function render_bar_chart(rows, max_width)
       local row = rows[i]
       max_median = math_max(max_median, row.median_value)
       -- Suffix format: " factor (median)" -> " " + " (" + ")" = 3 fixed chars
-      max_suffix_len = math_max(max_suffix_len, 3 + display_width(row.factor) + #row.median)
-      max_name_len = math_max(max_name_len, display_width(row.name))
+      max_suffix_len = math_max(max_suffix_len, 3 + utf8_width(row.factor) + #row.median)
+      max_name_len = math_max(max_name_len, utf8_width(row.name))
    end
 
    -- Calculate column widths
@@ -578,18 +566,16 @@ end
 -- Columns that should be right-aligned
 local RIGHT_ALIGN_COLS = { rank = true, median = true, ops = true }
 
----Render plain text table with embedded bar chart in factor column.
----Bars are scaled by median (smaller bar = faster).
 ---@param rows table[]
 ---@param widths integer[]
----@param show_ops boolean Whether to show the ops column
+---@param show_ops boolean
 ---@return string
 local function render_plain_table(rows, widths, show_ops)
    local max_median = 0
    local max_factor_width = 0
    for i = 1, #rows do
       max_median = math_max(max_median, rows[i].median_value)
-      max_factor_width = math_max(max_factor_width, display_width(rows[i].factor))
+      max_factor_width = math_max(max_factor_width, utf8_width(rows[i].factor))
    end
    local factor_bar_width = EMBEDDED_BAR_WIDTH + max_factor_width + 1
 
@@ -633,8 +619,7 @@ local function render_plain_table(rows, widths, show_ops)
    return table.concat(lines, "\n")
 end
 
----Render summary table (plain/compact).
----@param results luamark.Result[] Results array (already sorted by rank).
+---@param results luamark.Result[]
 ---@param format "plain"|"compact"
 ---@param max_width? integer
 ---@return string
@@ -654,11 +639,10 @@ local function render_summary(results, format, max_width)
       return table.concat(render_bar_chart(rows, max_width), "\n")
    end
 
-   -- Show ops column only for time benchmarks (unit="s")
-   local show_ops = results[1] and results[1].unit == "s"
+   local show_ops = results[1] and results[1].unit == TIME
 
    local widths = calculate_column_widths(rows)
-   fit_names(rows, widths, max_width)
+   fit_names_inplace(rows, widths, max_width)
    return render_plain_table(rows, widths, show_ops)
 end
 
@@ -679,9 +663,8 @@ end
 
 local MAX_PARAM_COMBINATIONS = 10000
 
---- Generate cartesian product of all parameter values.
 ---@param params table<string, any[]>?
----@return table[] # Array of param combinations
+---@return table[]
 local function expand_params(params)
    if not params or not next(params) then
       return { {} }
@@ -822,8 +805,6 @@ local function calibrate_iterations(fn, setup, teardown, get_ctx, params)
    return iterations
 end
 
----Return practical rounds and max time.
----Benchmark runs until both targets are met: at least `rounds` samples and `time` seconds.
 ---@param round_duration number
 ---@return integer rounds
 ---@return number time
@@ -953,7 +934,7 @@ local function build_stats_result(samples, rounds, iterations, timestamp, unit)
    stats.timestamp = timestamp
    stats.unit = unit
 
-   if unit == "s" and stats.median > 0 then
+   if unit == TIME and stats.median > 0 then
       stats.ops = 1 / stats.median
    end
 
@@ -965,34 +946,8 @@ local function build_stats_result(samples, rounds, iterations, timestamp, unit)
    return stats
 end
 
--- Sentinel value to indicate "no context" without using nil.
--- Required because suite mode needs to distinguish "no ctx passed" from "ctx is nil".
--- Using varargs with select("#", ...) caused memory allocation overhead.
-local NIL_CTX = {}
-
---- Create a hook invoker that optionally appends params to all calls.
---- In single mode: passes ctx only if provided (setup gets no args, others get ctx).
---- In suite mode: passes (params) when ctx is NIL_CTX, or (ctx, params) otherwise.
----@param single_mode boolean? When true, calls hooks without params.
----@param params table Parameter table to append in suite mode.
----@return function invoke Hook invoker function.
-local function make_invoke(single_mode, params)
-   if single_mode then
-      return function(hook, ctx)
-         if not ctx or ctx == NIL_CTX then
-            return hook()
-         end
-         return hook(ctx)
-      end
-   end
-   -- Suite mode: use sentinel to detect "no ctx" (avoids varargs allocation overhead)
-   return function(hook, ctx)
-      if ctx == NIL_CTX then
-         return hook(params)
-      end
-      return hook(ctx, params)
-   end
-end
+-- Sentinel to avoid creating new tables for single mode (timeit/memit).
+local EMPTY_PARAMS = {}
 
 --- Run a benchmark on a function using a specified measurement method.
 ---@param fn luamark.Fun Function to benchmark.
@@ -1003,10 +958,9 @@ end
 ---@param time? number Target duration in seconds.
 ---@param setup? function Runs once before benchmark, returns context.
 ---@param teardown? function Runs once after benchmark.
----@param params? table Parameter values for this run (nil for single mode).
+---@param params? table Parameter values for this run.
 ---@param before? function Per-iteration setup (from Spec), returns iteration context.
 ---@param after? function Per-iteration teardown (from Spec).
----@param single_mode? boolean When true, hooks receive no params argument.
 ---@return luamark.Stats
 local function single_benchmark(
    fn,
@@ -1019,18 +973,16 @@ local function single_benchmark(
    teardown,
    params,
    before,
-   after,
-   single_mode
+   after
 )
    validate_benchmark_args(fn, rounds, time, setup, teardown)
    warn_low_precision_clock()
 
-   params = params or {}
-   local invoke = make_invoke(single_mode, params)
+   params = params or EMPTY_PARAMS
 
    local ctx
    if setup then
-      ctx = invoke(setup, NIL_CTX)
+      ctx = setup(params)
    end
 
    -- Using a closure avoids creating a new function per iteration.
@@ -1045,7 +997,7 @@ local function single_benchmark(
    if before then
       iteration_setup = function()
          iteration_ctx = ctx
-         iteration_ctx = invoke(before, iteration_ctx) or iteration_ctx
+         iteration_ctx = before(iteration_ctx, params) or iteration_ctx
       end
    end
 
@@ -1053,7 +1005,7 @@ local function single_benchmark(
    local iteration_teardown
    if after then
       iteration_teardown = function()
-         invoke(after, iteration_ctx)
+         after(iteration_ctx, params)
       end
    end
 
@@ -1101,7 +1053,7 @@ local function single_benchmark(
    collectgarbage("restart")
 
    if teardown then
-      local teardown_ok, teardown_err = pcall(invoke, teardown, ctx)
+      local teardown_ok, teardown_err = pcall(teardown, ctx, params)
       if not teardown_ok and bench_ok then
          error(teardown_err, 0)
       end
@@ -1155,13 +1107,15 @@ local function collect_param_names(rows)
    return sorted_keys(seen)
 end
 
----Format parameter values as a readable string from result.
----@param row luamark.Result
+---Format parameter values as a readable string.
+---@param params table<string, any>?
 ---@param param_names string[]
 ---@return string
-local function format_params(row, param_names)
+local function format_params(params, param_names)
+   if not params then
+      return ""
+   end
    local parts = {}
-   local params = row.params or {}
    for i = 1, #param_names do
       local name = param_names[i]
       if params[name] ~= nil then
@@ -1186,7 +1140,7 @@ end
 local function rank_results(results, param_names)
    local groups = {}
    for _, row in ipairs(results) do
-      local key = format_params(row, param_names)
+      local key = format_params(row.params, param_names)
       groups[key] = groups[key] or {}
       groups[key][#groups[key] + 1] = row
    end
@@ -1266,8 +1220,7 @@ local function benchmark_suite(funcs, measure, suspend_gc, unit, opts)
             opts.teardown,
             p,
             before,
-            after,
-            false -- suite mode: hooks receive params
+            after
          )
          -- Build result row with nested params
          local row = { name = name, params = p }
@@ -1356,12 +1309,47 @@ end
 ---@field after? luamark.after Per-iteration teardown; returns iteration context.
 ---@field baseline? boolean If true, this function serves as 1x baseline for factor comparison.
 
+---@param unit_results luamark.Result[]
+---@param format "plain"|"compact"
+---@param max_width integer
+---@return string
+local function render_unit_group(unit_results, format, max_width)
+   local param_names = collect_param_names(unit_results)
+
+   -- Group by params table identity (avoids reformatting each row)
+   local groups = {}
+   local order = {}
+   for i = 1, #unit_results do
+      local p = unit_results[i].params or EMPTY_PARAMS
+      if not groups[p] then
+         groups[p] = {}
+         order[#order + 1] = p
+      end
+      groups[p][#groups[p] + 1] = unit_results[i]
+   end
+
+   if #order == 1 then
+      return render_summary(groups[order[1]], format, max_width)
+   end
+
+   local output = {}
+   for i = 1, #order do
+      local p = order[i]
+      local header = format_params(p, param_names)
+      if header ~= "" then
+         output[#output + 1] = header
+      end
+      output[#output + 1] = render_summary(groups[p], format, max_width)
+      if i < #order then
+         output[#output + 1] = ""
+      end
+   end
+   return table.concat(output, "\n")
+end
+
 --- Render benchmark results as a formatted string.
 ---
---- NOTE: Results should be homogeneous (same unit). Mixing time (unit="s") and
---- memory (unit="kb") results produces undefined ordering. Call render()
---- separately for each benchmark type when combining compare_time() and
---- compare_memory() results.
+--- Mixed results (time and memory) are automatically grouped by unit.
 ---@param results luamark.Stats|luamark.Result[] Single stats or benchmark results array.
 ---@param short? boolean If true, show bar chart only; if false/nil, show full table. Ignored for single Stats.
 ---@param max_width? integer Maximum output width (default: terminal width). Ignored for single Stats.
@@ -1377,34 +1365,36 @@ function luamark.render(results, short, max_width)
 
    max_width = max_width or get_term_width()
    local format = short and "compact" or "plain"
-   local param_names = collect_param_names(results)
 
-   -- Group by params (single group with key "" if no params)
-   local groups = {} ---@type table<string, luamark.Result[]>
+   -- Group by unit
+   local groups = {}
    for i = 1, #results do
-      local row = results[i]
-      local key = format_params(row, param_names)
-      groups[key] = groups[key] or {}
-      groups[key][#groups[key] + 1] = row
+      local unit = results[i].unit
+      groups[unit] = groups[unit] or {}
+      groups[unit][#groups[unit] + 1] = results[i]
    end
 
-   local group_keys = sorted_keys(groups)
-
-   if #group_keys == 1 then
-      return render_summary(groups[group_keys[1]], format, max_width)
-   end
-
-   -- Multiple groups = add param headers
-   local output = {}
-   for i = 1, #group_keys do
-      local key = group_keys[i]
-      if key ~= "" then
-         output[#output + 1] = key
+   local keys = {}
+   for _, unit in ipairs(RENDER_UNITS) do
+      if groups[unit] then
+         keys[#keys + 1] = unit
       end
-      output[#output + 1] = render_summary(groups[key], format, max_width)
-      output[#output + 1] = ""
    end
 
+   if #keys == 1 then
+      return render_unit_group(groups[keys[1]], format, max_width)
+   end
+
+   local output = {}
+   for i = 1, #keys do
+      local unit = keys[i]
+      local header = UNITS[unit].label
+      output[#output + 1] = header
+      output[#output + 1] = render_unit_group(groups[unit], format, max_width)
+      if i < #keys then
+         output[#output + 1] = ""
+      end
+   end
    return table.concat(output, "\n")
 end
 
@@ -1421,15 +1411,11 @@ function luamark.timeit(fn, opts)
       fn,
       measure_time,
       true,
-      "s",
+      TIME,
       opts.rounds,
       opts.time,
       opts.setup,
-      opts.teardown,
-      nil, -- params
-      nil, -- before
-      nil, -- after
-      true -- single_mode
+      opts.teardown
    )
 end
 
@@ -1446,15 +1432,11 @@ function luamark.memit(fn, opts)
       fn,
       measure_memory,
       false,
-      "kb",
+      MEMORY,
       opts.rounds,
       opts.time,
       opts.setup,
-      opts.teardown,
-      nil, -- params
-      nil, -- before
-      nil, -- after
-      true -- single_mode
+      opts.teardown
    )
 end
 
@@ -1469,7 +1451,7 @@ function luamark.compare_time(funcs, opts)
    validate_funcs(funcs)
    opts = opts or {}
    validate_suite_options(opts)
-   return benchmark_suite(funcs, measure_time, true, "s", opts)
+   return benchmark_suite(funcs, measure_time, true, TIME, opts)
 end
 
 --- Compare multiple functions for memory usage.
@@ -1483,7 +1465,7 @@ function luamark.compare_memory(funcs, opts)
    validate_funcs(funcs)
    opts = opts or {}
    validate_suite_options(opts)
-   return benchmark_suite(funcs, measure_memory, false, "kb", opts)
+   return benchmark_suite(funcs, measure_memory, false, MEMORY, opts)
 end
 
 --- Format a time value to a human-readable string.
@@ -1491,7 +1473,7 @@ end
 ---@param s number Time in seconds.
 ---@return string Formatted time string (e.g., "42ns", "1.5ms").
 function luamark.humanize_time(s)
-   return humanize(s, "s")
+   return humanize(s, TIME)
 end
 
 --- Format a memory value to a human-readable string.
@@ -1499,7 +1481,7 @@ end
 ---@param kb number Memory in kilobytes.
 ---@return string Formatted memory string (e.g., "512kB", "1.5MB").
 function luamark.humanize_memory(kb)
-   return humanize(kb, "kb")
+   return humanize(kb, MEMORY)
 end
 
 --- Format a count to a human-readable string.
@@ -1507,7 +1489,7 @@ end
 ---@param n number Count value.
 ---@return string Formatted count string (e.g., "1k", "12.5M").
 function luamark.humanize_count(n)
-   return humanize(n, "count")
+   return humanize(n, COUNT)
 end
 
 ---@class luamark.Timer

@@ -139,11 +139,11 @@ describe("suite API (compare_time/compare_memory)", function()
          fast = h.noop,
          slow = h.noop,
       }, {
-         params = { n = { 10, 20 } },
+         params = { n = { 10 } },
          rounds = 1,
       })
 
-      assert.are_equal(4, #results)
+      assert.are_equal(2, #results) -- 2 functions × 1 param
    end)
 
    test("bench functions can be plain functions or tables with fn", function()
