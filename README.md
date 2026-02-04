@@ -140,16 +140,16 @@ print(luamark.render(results))
 ```
 
 ```text
-    Name      Rank      Factor       Median    Ops
-------------  ----  ---------------  ------  --------
-table_concat     1  █            1x     1us  959.7k/s
-loop             2  ████████ ↓5.12x     5us  187.5k/s
+    Name      Rank     Relative        Median      Ops
+------------  ----  ---------------  ----------  --------
+table_concat     1  █            1x         1us  959.7k/s
+loop             2  ████████ ↓5.36x  6us ± 21ns  179.1k/s
 
 n=1000
-    Name      Rank       Factor         Median      Ops
-------------  ----  ----------------  -----------  ------
-table_concat     1  █             1x  10us ± 62ns   98k/s
-loop             2  ████████ ↓12.74x  130us ± 1us  7.7k/s
+    Name      Rank      Relative        Median       Ops
+------------  ----  ----------------  -----------  -------
+table_concat     1  █             1x  10us ± 31ns  98.4k/s
+loop             2  ████████ ↓13.07x  133us ± 2us   7.5k/s
 ```
 
 When results have overlapping confidence intervals, they share the same rank with

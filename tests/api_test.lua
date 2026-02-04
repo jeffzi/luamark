@@ -84,7 +84,7 @@ describe("suite API (compare_time/compare_memory)", function()
       local results = luamark.compare_time({
          test = h.noop,
       }, {
-         params = { median = { "test_value" }, name = { "custom" }, factor = { 99 } },
+         params = { median = { "test_value" }, name = { "custom" }, relative = { 99 } },
          rounds = 1,
       })
 
@@ -92,11 +92,11 @@ describe("suite API (compare_time/compare_memory)", function()
       -- Stats fields are preserved
       assert.is_number(results[1].median)
       assert.is_string(results[1].name)
-      assert.is_number(results[1].factor)
+      assert.is_number(results[1].relative)
       -- User params are accessible via nested params table
       assert.are_equal("test_value", results[1].params.median)
       assert.are_equal("custom", results[1].params.name)
-      assert.are_equal(99, results[1].params.factor)
+      assert.are_equal(99, results[1].params.relative)
    end)
 
    test("multiple params expand as cartesian product", function()

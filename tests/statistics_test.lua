@@ -229,14 +229,14 @@ describe("rank_results", function()
       assert.is_false(results[1].is_approximate)
    end)
 
-   test("factor calculated from position ordering", function()
+   test("relative calculated from position ordering", function()
       local results = { make_row("a", 10, 9, 11), make_row("b", 30, 29, 31) }
       rank_results(results, {})
-      assert.are_equal(1, results[1].factor)
-      assert.are_equal(3, results[2].factor)
+      assert.are_equal(1, results[1].relative)
+      assert.are_equal(3, results[2].relative)
    end)
 
-   test("baseline function is used for factor calculation", function()
+   test("baseline function is used for relative calculation", function()
       local results = {
          make_row("fast", 10, 9, 11),
          make_row("baseline", 20, 19, 21),
@@ -245,9 +245,9 @@ describe("rank_results", function()
       results[2].baseline = true
       rank_results(results, {})
       -- Ratios relative to baseline (median=20), not fastest (median=10)
-      assert.are_equal(0.5, results[1].factor) -- fast: 10/20 = 0.5
-      assert.are_equal(1, results[2].factor) -- baseline: 20/20 = 1
-      assert.are_equal(2, results[3].factor) -- slow: 40/20 = 2
+      assert.are_equal(0.5, results[1].relative) -- fast: 10/20 = 0.5
+      assert.are_equal(1, results[2].relative) -- baseline: 20/20 = 1
+      assert.are_equal(2, results[3].relative) -- slow: 40/20 = 2
    end)
 
    test("fallback to fastest when no baseline specified", function()
@@ -257,8 +257,8 @@ describe("rank_results", function()
       }
       rank_results(results, {})
       -- Ratios relative to fastest (median=10)
-      assert.are_equal(1, results[1].factor)
-      assert.are_equal(3, results[2].factor)
+      assert.are_equal(1, results[1].relative)
+      assert.are_equal(3, results[2].relative)
    end)
 
    test("error when multiple baselines in same group", function()

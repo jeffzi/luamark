@@ -77,10 +77,10 @@ end
 ---@param name string
 ---@param median number
 ---@param rank_value integer
----@param factor_value number
+---@param relative_value number
 ---@param opts? {unit?: "s"|"kb", ci_lower?: number, ci_upper?: number, ci_margin?: number, is_approximate?: boolean, params?: table}
 ---@return table
-local function make_result_row(name, median, rank_value, factor_value, opts)
+local function make_result_row(name, median, rank_value, relative_value, opts)
    opts = opts or {}
    local unit = opts.unit or "s"
    local ci_lower = opts.ci_lower or (median * 0.9)
@@ -96,7 +96,7 @@ local function make_result_row(name, median, rank_value, factor_value, opts)
       iterations = 1000,
       unit = unit,
       rank = rank_value,
-      factor = factor_value,
+      relative = relative_value,
       is_approximate = opts.is_approximate or false,
       params = opts.params or {},
    }

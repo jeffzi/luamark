@@ -309,7 +309,7 @@ local EMBEDDED_BAR_WIDTH = 8
 local SUMMARIZE_HEADERS = {
    "name",
    "rank",
-   "factor",
+   "relative",
    "median",
    "ops",
 }
@@ -317,7 +317,7 @@ local SUMMARIZE_HEADERS = {
 local HEADER_LABELS = {
    name = "Name",
    rank = "Rank",
-   factor = "Factor",
+   relative = "Relative",
    median = "Median",
    ops = "Ops",
 }
@@ -445,19 +445,19 @@ local function render_stats(stats)
    return table.concat(lines, "\n")
 end
 
---- Format factor with arrow: 1x (baseline), ↑Nx (faster), ↓Nx (slower).
----@param factor number|nil
+--- Format relative with arrow: 1x (baseline), ↑Nx (faster), ↓Nx (slower).
+---@param relative number|nil
 ---@return string
-local function format_factor(factor)
-   if not factor then
+local function format_relative(relative)
+   if not relative then
       return ""
    end
-   if factor == 1 then
+   if relative == 1 then
       return "1x"
-   elseif factor < 1 then
-      return "↑" .. trim_zeroes(string.format("%.2f", 1 / factor)) .. "x"
+   elseif relative < 1 then
+      return "↑" .. trim_zeroes(string.format("%.2f", 1 / relative)) .. "x"
    else
-      return "↓" .. trim_zeroes(string.format("%.2f", factor)) .. "x"
+      return "↓" .. trim_zeroes(string.format("%.2f", relative)) .. "x"
    end
 end
 
@@ -475,7 +475,7 @@ local function format_row(stats)
 
    return {
       rank = rank_str,
-      factor = format_factor(stats.factor),
+      relative = format_relative(stats.relative),
       median = format_median(stats.median, stats.ci_margin, unit),
       ops = stats.ops and (humanize(stats.ops, COUNT) .. "/s") or "",
    }
@@ -517,19 +517,20 @@ local function fit_names_inplace(rows, widths, max_width)
    end
 end
 
----@param factor_str string
+---@param relative_str string
 ---@param bar_width integer
----@param max_factor_width integer
+---@param max_relative_width integer
 ---@return string
-local function build_factor_bar(factor_str, bar_width, max_factor_width)
+local function build_relative_bar(relative_str, bar_width, max_relative_width)
    local bar = string.rep(BAR_CHAR, bar_width)
    local padded_bar = bar .. string.rep(" ", EMBEDDED_BAR_WIDTH - bar_width)
    -- Use utf8_width for UTF-8 aware padding (arrows are multi-byte)
-   local padded_factor = string.rep(" ", max_factor_width - utf8_width(factor_str)) .. factor_str
-   return padded_bar .. " " .. padded_factor
+   local padded_relative = string.rep(" ", max_relative_width - utf8_width(relative_str))
+      .. relative_str
+   return padded_bar .. " " .. padded_relative
 end
 
----@param rows {name: string, factor: string, median: string, median_value: number}[]
+---@param rows {name: string, relative: string, median: string, median_value: number}[]
 ---@param max_width? integer
 ---@return string[]
 local function render_bar_chart(rows, max_width)
@@ -541,8 +542,8 @@ local function render_bar_chart(rows, max_width)
    for i = 1, #rows do
       local row = rows[i]
       max_median = math_max(max_median, row.median_value)
-      -- Suffix format: " factor (median)" -> " " + " (" + ")" = 3 fixed chars
-      max_suffix_len = math_max(max_suffix_len, 3 + utf8_width(row.factor) + #row.median)
+      -- Suffix format: " relative (median)" -> " " + " (" + ")" = 3 fixed chars
+      max_suffix_len = math_max(max_suffix_len, 3 + utf8_width(row.relative) + #row.median)
       max_name_len = math_max(max_name_len, utf8_width(row.name))
    end
 
@@ -558,7 +559,7 @@ local function render_bar_chart(rows, max_width)
       local bar_width = math_max(1, math_floor((row.median_value / max_median) * bar_max))
       local name = align_left(truncate_name(row.name, name_max), name_max)
       local bar = string.rep(BAR_CHAR, bar_width)
-      lines[i] = string.format("%s  |%s %s (%s)", name, bar, row.factor, row.median)
+      lines[i] = string.format("%s  |%s %s (%s)", name, bar, row.relative, row.median)
    end
    return lines
 end
@@ -572,18 +573,18 @@ local RIGHT_ALIGN_COLS = { rank = true, median = true, ops = true }
 ---@return string
 local function render_plain_table(rows, widths, show_ops)
    local max_median = 0
-   local max_factor_width = 0
+   local max_relative_width = 0
    for i = 1, #rows do
       max_median = math_max(max_median, rows[i].median_value)
-      max_factor_width = math_max(max_factor_width, utf8_width(rows[i].factor))
+      max_relative_width = math_max(max_relative_width, utf8_width(rows[i].relative))
    end
-   local factor_bar_width = EMBEDDED_BAR_WIDTH + max_factor_width + 1
+   local relative_bar_width = EMBEDDED_BAR_WIDTH + max_relative_width + 1
 
    local header_cells, underline_cells = {}, {}
    for i, header in ipairs(SUMMARIZE_HEADERS) do
       -- Skip ops column for memory benchmarks
       if header ~= "ops" or show_ops then
-         local width = (header == "factor") and factor_bar_width or widths[i]
+         local width = (header == "relative") and relative_bar_width or widths[i]
          local label = HEADER_LABELS[header]
          header_cells[#header_cells + 1] = center(label, width)
          underline_cells[#underline_cells + 1] = string.rep("-", width)
@@ -598,13 +599,13 @@ local function render_plain_table(rows, widths, show_ops)
       for i, header in ipairs(SUMMARIZE_HEADERS) do
          -- Skip ops column for memory benchmarks
          if header ~= "ops" or show_ops then
-            if header == "factor" then
+            if header == "relative" then
                -- Scale bar by median (smaller bar = less time = faster)
                local bar_width =
                   math_max(1, math_floor((row.median_value / max_median) * EMBEDDED_BAR_WIDTH))
                cells[#cells + 1] = align_left(
-                  build_factor_bar(row.factor, bar_width, max_factor_width),
-                  factor_bar_width
+                  build_relative_bar(row.relative, bar_width, max_relative_width),
+                  relative_bar_width
                )
             elseif RIGHT_ALIGN_COLS[header] then
                cells[#cells + 1] = align_right(row[header], widths[i])
@@ -1161,14 +1162,14 @@ local function rank_results(results, param_names)
       local baseline_median = baseline_row and baseline_row.median or group[1].median
 
       local first = group[1]
-      first.factor = baseline_median > 0 and (first.median / baseline_median) or 1
+      first.relative = baseline_median > 0 and (first.median / baseline_median) or 1
       first.rank = 1
       first.is_approximate = false
 
       for i = 2, #group do
          local r = group[i]
          local prev = group[i - 1]
-         r.factor = baseline_median > 0 and (r.median / baseline_median) or 1
+         r.relative = baseline_median > 0 and (r.median / baseline_median) or 1
 
          if r.ci_lower <= prev.ci_upper and prev.ci_lower <= r.ci_upper then
             r.rank = prev.rank
@@ -1255,7 +1256,7 @@ end
 ---@field ci_margin number Half-width of confidence interval ((upper - lower) / 2).
 ---@field total number Sum of all samples.
 ---@field samples number[] Raw samples (sorted).
----@field factor? number Factor relative to baseline (or fastest if no baseline).
+---@field relative? number Relative to baseline (or fastest if no baseline).
 ---@field rank? integer Rank within benchmark group.
 
 ---@class luamark.Stats : luamark.BaseStats
@@ -1264,7 +1265,7 @@ end
 ---@field timestamp string ISO 8601 UTC timestamp of benchmark start.
 ---@field unit "s"|"kb" Measurement unit (seconds or kilobytes).
 ---@field ops? number Operations per second (1/median). Only present for time benchmarks.
----@field factor? number Factor relative to baseline (or fastest if no baseline).
+---@field relative? number Relative to baseline (or fastest if no baseline).
 ---@field rank? integer Rank accounting for CI overlap (tied results share the same rank).
 ---@field is_approximate? boolean True if rank is approximate due to overlapping CIs.
 
@@ -1275,7 +1276,7 @@ end
 ---@field timestamp string ISO 8601 UTC timestamp of benchmark start.
 ---@field unit "s"|"kb" Measurement unit (seconds or kilobytes).
 ---@field ops? number Operations per second (1/median). Only present for time benchmarks.
----@field factor? number Factor relative to baseline (or fastest if no baseline).
+---@field relative? number Relative to baseline (or fastest if no baseline).
 ---@field rank? integer Rank accounting for CI overlap (tied results share the same rank).
 ---@field is_approximate? boolean True if rank is approximate due to overlapping CIs.
 ---@field params table<string, any> User-defined parameters for this benchmark run.
@@ -1307,7 +1308,7 @@ end
 ---@field fn luamark.Fun  Benchmark function; receives iteration context and params.
 ---@field before? luamark.before Per-iteration setup; returns iteration context.
 ---@field after? luamark.after Per-iteration teardown; returns iteration context.
----@field baseline? boolean If true, this function serves as 1x baseline for factor comparison.
+---@field baseline? boolean If true, this function serves as 1x baseline for relative comparison.
 
 ---@param unit_results luamark.Result[]
 ---@param format "plain"|"compact"

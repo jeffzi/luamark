@@ -32,7 +32,7 @@ describe("render", function()
       assert.matches("Median", output)
       -- Hidden columns stay hidden
       assert.not_matches("Rounds", output)
-      -- Factor formatting
+      -- Relative column
       assert.matches("fast.*1x", output)
       assert.matches("slow.*↓3x", output)
    end)

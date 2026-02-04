@@ -208,12 +208,12 @@ instead of a plain function:
 ---@field fn fun(ctx: any, params: table) Benchmark function; receives iteration context and params.
 ---@field before? fun(ctx: any, params: table): any Per-iteration setup; returns iteration context.
 ---@field after? fun(ctx: any, params: table) Per-iteration teardown.
----@field baseline? boolean If true, this function is the 1x reference for factor comparison.
+---@field baseline? boolean If true, this function is the 1x reference for relative comparison.
 ```
 
 **Baseline:** Set `baseline = true` on a Spec to make that function the reference point
-for factor calculations. By default, the fastest function in each parameter group has
-factor `1x`. With a baseline, the baseline function always shows `1x`, and other
+for relative calculations. By default, the fastest function in each parameter group has
+relative `1x`. With a baseline, the baseline function always shows `1x`, and other
 functions show their performance relative to it with direction arrows:
 
 - `↑Nx` = N times faster than baseline
@@ -339,7 +339,7 @@ print(result.params.n)   -- 100 (param field, if params = {n = {100}} was used)
 | unit           | "s"\|"kb"            | Measurement unit (seconds or kilobytes)                |
 | ops            | number?              | Operations per second (1/median, time benchmarks only) |
 | rank           | integer?             | Rank accounting for CI overlap                         |
-| factor         | number?              | Factor relative to baseline (or fastest if none)       |
+| relative       | number?              | Relative to baseline (or fastest if none)              |
 | is_approximate | boolean?             | True if rank is tied due to CI overlap                 |
 | params         | table\<string, any\> | User-defined parameters (e.g., `result.params.n`)      |
 
@@ -348,7 +348,7 @@ same rank with an `≈` prefix. For example, `≈1 ≈1 3` means the first two r
 overlapping CIs (statistically indistinguishable), while the third is clearly slower.
 The gap in rank numbers (1 to 3) indicates skipped positions.
 
-**Factor display:** Factors are shown with direction arrows relative to the baseline:
+**Relative display:** Relative values are shown with direction arrows relative to the baseline:
 
 - `1x` = baseline function (no arrow)
 - `↑7.14x` = 7.14 times faster than baseline
@@ -458,7 +458,7 @@ Mixed results (time and memory) are automatically grouped by unit.
 
 @_param_ `short` — Output format. Ignored for single Stats.
 
-- `false` or `nil` (default): Full table with embedded bar chart in Factor column
+- `false` or `nil` (default): Full table with embedded bar chart in Relative column
 - `true`: Bar chart only (compact)
 
 @_param_ `max_width` — Maximum output width (default: terminal width). Ignored for single Stats.
