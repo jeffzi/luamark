@@ -64,12 +64,16 @@ end
 
 local function noop() end
 
+local REQUIRED_STATS_FIELDS =
+   { "median", "ci_lower", "ci_upper", "ci_margin", "rounds", "iterations", "unit" }
+
 --- Verify stats object exists and all its fields are non-nil.
 ---@param stats table
 local function assert_stats_valid(stats)
    assert(stats, "stats should not be nil")
-   for field, value in pairs(stats) do
-      assert(value ~= nil, "stats." .. field .. " should not be nil")
+   for i = 1, #REQUIRED_STATS_FIELDS do
+      local field = REQUIRED_STATS_FIELDS[i]
+      assert(stats[field] ~= nil, "stats." .. field .. " should not be nil")
    end
 end
 

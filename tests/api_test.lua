@@ -49,7 +49,7 @@ describe("simple API (timeit/memit)", function()
       local str = tostring(stats)
 
       -- Should contain humanized time (ns, us, ms, or s)
-      assert.matches("[num]s", str)
+      assert.matches("%d[nmu]?s", str)
    end)
 end)
 

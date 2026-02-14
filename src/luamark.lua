@@ -416,13 +416,6 @@ local function format_median(median, margin, unit)
    return humanize(median, unit) .. " ± " .. margin_str
 end
 
----@param stats table
----@param unit default_unit
----@return string
-local function stats_tostring(stats, unit)
-   return format_median(stats.median, stats.ci_margin, unit)
-end
-
 ---@param stats luamark.Stats
 ---@return string
 local function render_stats(stats)
@@ -580,15 +573,18 @@ local function render_plain_table(rows, widths, show_ops)
    end
    local relative_bar_width = EMBEDDED_BAR_WIDTH + max_relative_width + 1
 
-   local header_cells, underline_cells = {}, {}
+   local visible_headers = {}
    for i, header in ipairs(SUMMARIZE_HEADERS) do
-      -- Skip ops column for memory benchmarks
       if header ~= "ops" or show_ops then
-         local width = (header == "relative") and relative_bar_width or widths[i]
-         local label = HEADER_LABELS[header]
-         header_cells[#header_cells + 1] = center(label, width)
-         underline_cells[#underline_cells + 1] = string.rep("-", width)
+         visible_headers[#visible_headers + 1] = { idx = i, name = header }
       end
+   end
+
+   local header_cells, underline_cells = {}, {}
+   for _, col in ipairs(visible_headers) do
+      local width = (col.name == "relative") and relative_bar_width or widths[col.idx]
+      header_cells[#header_cells + 1] = center(HEADER_LABELS[col.name], width)
+      underline_cells[#underline_cells + 1] = string.rep("-", width)
    end
 
    local lines = { concat_line(header_cells), concat_line(underline_cells) }
@@ -596,22 +592,19 @@ local function render_plain_table(rows, widths, show_ops)
    for r = 1, #rows do
       local row = rows[r]
       local cells = {}
-      for i, header in ipairs(SUMMARIZE_HEADERS) do
-         -- Skip ops column for memory benchmarks
-         if header ~= "ops" or show_ops then
-            if header == "relative" then
-               -- Scale bar by median (smaller bar = less time = faster)
-               local bar_width =
-                  math_max(1, math_floor((row.median_value / max_median) * EMBEDDED_BAR_WIDTH))
-               cells[#cells + 1] = align_left(
-                  build_relative_bar(row.relative, bar_width, max_relative_width),
-                  relative_bar_width
-               )
-            elseif RIGHT_ALIGN_COLS[header] then
-               cells[#cells + 1] = align_right(row[header], widths[i])
-            else
-               cells[#cells + 1] = align_left(row[header], widths[i])
-            end
+      for _, col in ipairs(visible_headers) do
+         if col.name == "relative" then
+            -- Scale bar by median (smaller bar = less time = faster)
+            local bar_width =
+               math_max(1, math_floor((row.median_value / max_median) * EMBEDDED_BAR_WIDTH))
+            cells[#cells + 1] = align_left(
+               build_relative_bar(row.relative, bar_width, max_relative_width),
+               relative_bar_width
+            )
+         elseif RIGHT_ALIGN_COLS[col.name] then
+            cells[#cells + 1] = align_right(row[col.name], widths[col.idx])
+         else
+            cells[#cells + 1] = align_left(row[col.name], widths[col.idx])
          end
       end
       lines[#lines + 1] = concat_line(cells)
@@ -795,7 +788,12 @@ local function calibrate_iterations(fn, setup, teardown, get_ctx, params)
          break
       end
 
-      local scale = total_time > 0 and (min_time / total_time) or ZERO_TIME_SCALE
+      local scale
+      if total_time > 0 then
+         scale = min_time / total_time
+      else
+         scale = ZERO_TIME_SCALE
+      end
       iterations = math_ceil(iterations * scale)
 
       if iterations >= MAX_ITERATIONS then
@@ -941,7 +939,7 @@ local function build_stats_result(samples, rounds, iterations, timestamp, unit)
 
    setmetatable(stats, {
       __tostring = function(self)
-         return stats_tostring(self, unit)
+         return format_median(self.median, self.ci_margin, unit)
       end,
    })
    return stats
@@ -997,8 +995,7 @@ local function single_benchmark(
    local iteration_setup
    if before then
       iteration_setup = function()
-         iteration_ctx = ctx
-         iteration_ctx = before(iteration_ctx, params) or iteration_ctx
+         iteration_ctx = before(ctx, params) or ctx
       end
    end
 
@@ -1162,14 +1159,22 @@ local function rank_results(results, param_names)
       local baseline_median = baseline_row and baseline_row.median or group[1].median
 
       local first = group[1]
-      first.relative = baseline_median > 0 and (first.median / baseline_median) or 1
+      if baseline_median > 0 then
+         first.relative = first.median / baseline_median
+      else
+         first.relative = 1
+      end
       first.rank = 1
       first.is_approximate = false
 
       for i = 2, #group do
          local r = group[i]
          local prev = group[i - 1]
-         r.relative = baseline_median > 0 and (r.median / baseline_median) or 1
+         if baseline_median > 0 then
+            r.relative = r.median / baseline_median
+         else
+            r.relative = 1
+         end
 
          if r.ci_lower <= prev.ci_upper and prev.ci_lower <= r.ci_upper then
             r.rank = prev.rank
