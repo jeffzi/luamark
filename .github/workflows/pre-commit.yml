@@ -1,0 +1,17 @@
+name: prek
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  prek:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install dprint
+        run: curl -fsSL https://dprint.dev/install.sh | sh && echo "$HOME/.dprint/bin" >> "$GITHUB_PATH"
+      - uses: j178/prek-action@v1
+        env:
+          SKIP: luacheck,llscheck
