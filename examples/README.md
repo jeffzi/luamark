@@ -20,12 +20,12 @@ done
 
 ## Examples
 
-| File                     | API                | Description                |
-| ------------------------ | ------------------ | -------------------------- |
-| [timeit.lua]             | `timeit`           | Benchmark execution time   |
-| [memit.lua]              | `memit`            | Benchmark memory usage     |
-| [compare_functions.lua]  | `compare_time/mem` | Compare multiple functions |
-| [timer.lua]              | `Timer`            | Manual profiling           |
+| File                    | API                | Description                |
+| ----------------------- | ------------------ | -------------------------- |
+| [timeit.lua]            | `timeit`           | Benchmark execution time   |
+| [memit.lua]             | `memit`            | Benchmark memory usage     |
+| [compare_functions.lua] | `compare_time/mem` | Compare multiple functions |
+| [timer.lua]             | `Timer`            | Manual profiling           |
 
 [timeit.lua]: timeit.lua
 [memit.lua]: memit.lua

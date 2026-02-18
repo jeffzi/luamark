@@ -34,7 +34,7 @@ Install LuaMark using [LuaRocks](https://luarocks.org/):
 luarocks install luamark
 ```
 
-Alternatively, you can manually include [luamark.lua](src/luamark.lua) in your project.
+Or include [luamark.lua](src/luamark.lua) directly in your project.
 
 ## Usage
 
@@ -150,8 +150,8 @@ table_concat     1  █             1x  10us ± 31ns  98.4k/s
 loop             2  ████████ ↓13.07x  133us ± 2us   7.5k/s
 ```
 
-When results have overlapping confidence intervals, they share the same rank with
-an `≈` prefix (e.g., `≈1 ≈1 3`), indicating they are statistically indistinguishable.
+Results with overlapping confidence intervals share the same rank with an `≈`
+prefix (e.g., `≈1 ≈1 3`), meaning they are statistically indistinguishable.
 
 ### Per-Iteration Setup with Spec Hooks
 
@@ -188,7 +188,7 @@ local results = luamark.compare_time({
 
 ### Standalone Timer
 
-Use `luamark.Timer()` for ad-hoc profiling outside of benchmarks:
+Use `luamark.Timer()` for ad-hoc profiling outside benchmarks:
 
 ```lua
 local luamark = require("luamark")
@@ -212,8 +212,8 @@ LuaMark provides two configuration options:
 - `time`: Target duration in seconds (default: 1)
 
 Benchmarks run until **either** target is met: `rounds` samples collected
-or `time` seconds elapsed. For very fast functions, rounds are capped at 100
-to ensure consistent sample count.
+or `time` seconds elapsed. For very fast functions, LuaMark caps rounds at 100
+to ensure a consistent sample count.
 
 Modify these settings directly:
 
@@ -254,4 +254,4 @@ Contributions welcome: bug fixes, documentation, new features.
 
 ## License
 
-LuaMark is released under the [MIT License](LICENSE).
+LuaMark uses the [MIT License](LICENSE).

@@ -24,7 +24,7 @@ Use [`timeit`](#timeit) and [`memit`](#memit) to benchmark a single function.
 function luamark.timeit(fn: fun(ctx?: any), opts?: Options) -> Stats
 ```
 
-Benchmark a single function for execution time. Time is measured in seconds.
+Benchmark execution time for a single function. Measures time in seconds.
 See [`Options`](#options) for configuration and [`Stats`](#stats) for return type.
 
 ```lua
@@ -42,7 +42,7 @@ print(stats.median, stats.ci_margin)  -- Access individual fields
 function luamark.memit(fn: fun(ctx?: any), opts?: Options) -> Stats
 ```
 
-Benchmark a single function for memory usage. Memory is measured in kilobytes.
+Benchmark memory usage for a single function. Measures memory in kilobytes.
 See [`Options`](#options) for configuration and [`Stats`](#stats) for return type.
 
 ```lua
@@ -77,10 +77,9 @@ print(stats)  -- "250ns ± 0ns"
 | unit       | "s"\|"kb" | Measurement unit (seconds or kilobytes)                |
 | ops        | number?   | Operations per second (1/median, time benchmarks only) |
 
-**Output format:** The `__tostring` metamethod outputs a compact format showing only
-`median ± ci_margin`. To access additional fields like `ops`, `rounds`, `iterations`,
-or the full confidence interval bounds (`ci_lower`/`ci_upper`), read them directly
-from the stats object:
+**Output format:** `__tostring` outputs `median ± ci_margin`. Access other
+fields—`ops`, `rounds`, `iterations`, `ci_lower`, `ci_upper`—directly on the
+stats object:
 
 ```lua
 local stats = luamark.timeit(fn)
@@ -113,9 +112,9 @@ setup() → ctx
 teardown(ctx)
 ```
 
-**Note:** The [`params`](#params) option is NOT supported in [`Options`](#options).
+**Note:** [`Options`](#options) does not support [`params`](#params).
 Use [`compare_time`](#compare_time)/[`compare_memory`](#compare_memory) for parameterized benchmarks.
-In single mode, hooks receive only `ctx`, not params.
+In single mode, hooks receive only `ctx`.
 
 ---
 
@@ -136,7 +135,7 @@ function luamark.compare_time(
 Compare multiple functions for execution time. Returns ranked [`Result[]`](#result).
 See [`SuiteOptions`](#suiteoptions) for configuration and [`Spec`](#spec) for per-iteration hooks.
 
-**Note:** `funcs` keys must be strings. Arrays are not supported.
+**Note:** `funcs` keys must be strings, not arrays.
 
 ```lua
 local results = luamark.compare_time({
@@ -168,7 +167,7 @@ function luamark.compare_memory(
 Compare multiple functions for memory usage. Returns ranked [`Result[]`](#result).
 See [`SuiteOptions`](#suiteoptions) for configuration and [`Spec`](#spec) for per-iteration hooks.
 
-**Note:** `funcs` keys must be strings. Arrays are not supported.
+**Note:** `funcs` keys must be strings, not arrays.
 
 ### SuiteOptions
 
@@ -211,15 +210,15 @@ instead of a plain function:
 ---@field baseline? boolean If true, this function is the 1x reference for relative comparison.
 ```
 
-**Baseline:** Set `baseline = true` on a Spec to make that function the reference point
-for relative calculations. By default, the fastest function in each parameter group has
-relative `1x`. With a baseline, the baseline function always shows `1x`, and other
-functions show their performance relative to it with direction arrows:
+**Baseline:** Set `baseline = true` on a Spec to make that function the reference
+point. By default, the fastest function in each parameter group shows `1x`. With an
+explicit baseline, that function always shows `1x`; others show their speed relative
+to it with direction arrows:
 
 - `↑Nx` = N times faster than baseline
 - `↓Nx` = N times slower than baseline
 
-Only one function per parameter group can be marked as baseline.
+Mark only one function per parameter group as baseline.
 
 **Execution order with Spec:**
 
@@ -301,7 +300,7 @@ luamark.compare_time({
 table<string, (string|number|boolean)[]>?
 ```
 
-Parameter combinations to benchmark across. Each key is a parameter name, each
+Parameter combinations to benchmark across. Each key is a parameter name; each
 value is an array of values to test. Values must be strings, numbers, or booleans.
 
 ```lua
@@ -328,11 +327,11 @@ print(results)  -- Prints bar chart (short format)
 print(luamark.render(results))  -- Prints full table with all stats
 ```
 
-**Sorting:** Results are grouped by parameter combination, then sorted by rank
-within each group (fastest first). This means you can iterate over results in
-display order without additional sorting.
+**Sorting:** luamark groups results by parameter combination, then sorts by rank
+within each group (fastest first). You can iterate in display order without
+additional sorting.
 
-Stats fields are directly on the result, while user params are nested in `result.params`:
+Stats fields live directly on the result; user params nest under `result.params`:
 
 ```lua
 -- Accessing result fields
@@ -361,12 +360,12 @@ print(result.params.n)   -- 100 (param field, if params = {n = {100}} was used)
 | is_approximate | boolean?             | True if rank is tied due to CI overlap                 |
 | params         | table\<string, any\> | User-defined parameters (e.g., `result.params.n`)      |
 
-**Rank display:** When results have overlapping confidence intervals, they share the
-same rank with an `≈` prefix. For example, `≈1 ≈1 3` means the first two results have
-overlapping CIs (statistically indistinguishable), while the third is clearly slower.
-The gap in rank numbers (1 to 3) indicates skipped positions.
+**Rank display:** Results with overlapping confidence intervals share the same rank,
+prefixed with `≈`. For example, `≈1 ≈1 3` means the first two are statistically
+indistinguishable; the third is clearly slower. The gap from 1 to 3 indicates
+skipped positions.
 
-**Relative display:** Relative values are shown with direction arrows relative to the baseline:
+**Relative display:** Direction arrows show each function's speed relative to the baseline:
 
 - `1x` = baseline function (no arrow)
 - `↑7.14x` = 7.14 times faster than baseline
@@ -374,7 +373,7 @@ The gap in rank numbers (1 to 3) indicates skipped positions.
 
 **Median display:** The Median column shows `value ± ci_margin` (e.g., `42ns ± 1ns`).
 
-**Ops column:** Only shown for time benchmarks (unit="s"), hidden for memory benchmarks.
+**Ops column:** Appears only for time benchmarks (unit="s").
 
 The bar chart scales by median time/memory (smaller bar = faster/less memory).
 
@@ -382,7 +381,7 @@ The bar chart scales by median time/memory (smaller bar = faster/less memory).
 
 ## Timer
 
-The `Timer` constructor creates a timer for ad-hoc manual profiling outside of benchmarks.
+`Timer` creates a timer for ad-hoc manual profiling outside benchmarks.
 It uses the same high-precision clock as the benchmark functions.
 
 ```lua
@@ -470,7 +469,7 @@ Accepts either a single [`Stats`](#stats) object (from [`timeit`](#timeit)/[`mem
 or an array of [`Result`](#result) objects
 (from [`compare_time`](#compare_time)/[`compare_memory`](#compare_memory)).
 
-Mixed results (time and memory) are automatically grouped by unit.
+Groups mixed results (time and memory) by unit.
 
 @_param_ `input` — Single [`Stats`](#stats) object or [`Result`](#result) array.
 
@@ -505,7 +504,7 @@ print(luamark.render(results, true))
 function luamark.humanize_time(s: number) -> string
 ```
 
-Format a time value to a human-readable string. Selects the best unit automatically (m, s, ms, us, ns).
+Format a time value as a human-readable string. Selects the best unit automatically (m, s, ms, us, ns).
 
 @_param_ `s` — Time in seconds.
 
@@ -517,7 +516,7 @@ Format a time value to a human-readable string. Selects the best unit automatica
 function luamark.humanize_memory(kb: number) -> string
 ```
 
-Format a memory value to a human-readable string.
+Format a memory value as a human-readable string.
 Selects the best unit automatically (TB, GB, MB, kB, B).
 
 @_param_ `kb` — Memory in kilobytes.
@@ -530,7 +529,7 @@ Selects the best unit automatically (TB, GB, MB, kB, B).
 function luamark.humanize_count(n: number) -> string
 ```
 
-Format a count to a human-readable string with SI suffix (M, k).
+Format a count as a human-readable string with SI suffix (M, k).
 
 @_param_ `n` — Count value.
 
@@ -575,8 +574,8 @@ luamark.time = 1      -- Target duration in seconds
 ```
 
 Benchmarks run until **either** target is met: `rounds` samples collected
-or `time` seconds elapsed. For very fast functions, rounds are capped at 100
-to ensure consistent sample count.
+or `time` seconds elapsed. For very fast functions, luamark caps rounds at
+100 to ensure a consistent sample count.
 
 ### clock_name
 
@@ -584,4 +583,4 @@ to ensure consistent sample count.
 luamark.clock_name  -- "chronos" | "posix.time" | "socket" | "os.clock"
 ```
 
-Read-only string indicating which clock module is in use.
+Read-only string naming the active clock module.
