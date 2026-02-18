@@ -246,7 +246,8 @@ LuaMark selects the best available clock:
 
 ## API Documentation
 
-For detailed API information, please refer to the [API Documentation](docs/api.md).
+For full API details, see the [API Documentation](docs/api.md).
+See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## Contributing
 
