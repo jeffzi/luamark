@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.0.1] - 2026-02-18
+
+### Changed
+
+- Fast functions now collect up to 1,000 rounds (previously capped at 100),
+  improving statistical accuracy at negligible cost.
+
 ## [v1.0.0] - 2026-02-17
 
 ### Changed
@@ -161,7 +168,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release. LuaMark is a portable microbenchmarking library for Lua that
   precisely measures execution time and memory usage.
 
-[Unreleased]: https://github.com/jeffzi/luamark/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/jeffzi/luamark/compare/v1.0.1...HEAD
+[v1.0.1]: https://github.com/jeffzi/luamark/compare/v1.0.0...v1.0.1
 [v1.0.0]: https://github.com/jeffzi/luamark/compare/v0.9.1...v1.0.0
 [v0.9.1]: https://github.com/jeffzi/luamark/compare/v0.9.0...v0.9.1
 [v0.9.0]: https://github.com/jeffzi/luamark/compare/v0.8.0...v0.9.0

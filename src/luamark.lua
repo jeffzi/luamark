@@ -3,7 +3,7 @@
 
 ---@class luamark
 local luamark = {
-   _VERSION = "0.9.0",
+   _VERSION = "1.0.1",
 }
 
 local math_ceil = math.ceil
