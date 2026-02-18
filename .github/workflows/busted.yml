@@ -7,7 +7,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        luaVersion: ["5.4", "5.3", "5.2", "5.1", "luajit-openresty"]
+        luaVersion: ["5.4", "5.3", "5.2", "5.1", "luajit-2.1"]
         os: [ubuntu-latest]
 
     runs-on: ${{ matrix.os }}
@@ -22,8 +22,6 @@ jobs:
 
       - name: Setup LuaRocks
         uses: leafo/gh-actions-luarocks@v6
-        with:
-          luarocksVersion: "3.12.2"
 
       - name: Setup dependencies
         run: |
@@ -48,8 +46,6 @@ jobs:
 
       - name: Setup LuaRocks
         uses: leafo/gh-actions-luarocks@v6
-        with:
-          luarocksVersion: "3.12.2"
 
       - name: Setup dependencies
         run: |
