@@ -166,7 +166,7 @@ for _, clock_name in ipairs(h.CLOCKS) do
                   local _ = string.rep("x", 1024)
                end,
                table_100 = function()
-                  local t = {}
+                  local t = {} -- luacheck: ignore t
                   for i = 1, 100 do
                      t[i] = i
                   end
@@ -181,6 +181,15 @@ for _, clock_name in ipairs(h.CLOCKS) do
             end
          end)
       end
+   end)
+end
+
+if type(jit) == "table" and jit.status and jit.status() then
+   -- Shells out because LuaJIT does not compile traces inside
+   -- coroutines (busted runs tests in coroutines), which hides the bug.
+   test("JIT trace overhead excluded from measurement", function()
+      local result = os.execute("lua tests/jit_trace_check.lua > /dev/null 2>&1")
+      assert.are_equal(0, result, "JIT trace overhead leaked into measurement")
    end)
 end
 

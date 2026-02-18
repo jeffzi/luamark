@@ -246,6 +246,24 @@ teardown(ctx, params)
 | `Spec.after`  | After each iteration (not measured)  | Validate results, cleanup            |
 | `teardown`    | Once per param combo                 | Close connections, cleanup           |
 
+**LuaJIT caveat:** `collectgarbage("count")` includes LuaJIT-internal `GCtrace` allocations.
+When the JIT compiles traces during a memory measurement, those allocations leak into the
+delta and produce non-deterministic results. Lua-level allocations (tables, strings, userdata)
+stay identical whether code runs JIT-compiled or interpreted; disabling the JIT for memory
+benchmarks does not change the measurement. Wide confidence intervals (~1 kB) on functions
+that should allocate a fixed amount signal this problem.
+
+**Workaround:** Call `jit.off()` before memory benchmarks and `jit.on()` after:
+
+```lua
+jit.off()
+local results = luamark.compare_memory(funcs)
+jit.on()
+```
+
+When you use `Spec.before` hooks, luamark flushes the JIT trace cache and raises `maxtrace`
+to prevent trace cache overflow during time benchmarks.
+
 **Example:** Benchmarking `table.sort` which mutates its input:
 
 ```lua

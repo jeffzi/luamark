@@ -13,6 +13,9 @@ local math_min = math.min
 local math_random = math.random
 local table_sort = table.sort
 
+local jit_flush = jit and jit.flush
+local jit_opt_start = jit and jit.opt and jit.opt.start
+
 -- ----------------------------------------------------------------------------
 -- Config
 -- ----------------------------------------------------------------------------
@@ -34,7 +37,7 @@ local BOOTSTRAP_RESAMPLES = 5000
 local CALIBRATION_PRECISION = 5
 local DEFAULT_TERM_WIDTH = 100
 local MEMORY_PRECISION = 4
-local BYTES_TO_KB = 1024
+local JIT_MAXTRACE = 20000
 local MAX_CALIBRATION_ATTEMPTS = 10
 local MAX_ITERATIONS = 1e6
 local MAX_ROUNDS = 100
@@ -143,24 +146,11 @@ local function measure_time_once(fn, ctx, params)
 end
 
 ---@type MeasureOnce
-local measure_memory_once
-do
-   local is_allocspy_installed, allocspy = pcall(require, "allocspy")
-   if is_allocspy_installed then
-      measure_memory_once = function(fn, ctx, params)
-         collectgarbage("collect")
-         allocspy.enable()
-         fn(ctx, params)
-         return allocspy.disable() / BYTES_TO_KB
-      end
-   else
-      measure_memory_once = function(fn, ctx, params)
-         collectgarbage("collect")
-         local start = collectgarbage("count")
-         fn(ctx, params)
-         return collectgarbage("count") - start
-      end
-   end
+local function measure_memory_once(fn, ctx, params)
+   collectgarbage("collect")
+   local start = collectgarbage("count")
+   fn(ctx, params)
+   return collectgarbage("count") - start
 end
 
 -- ----------------------------------------------------------------------------
@@ -1007,11 +997,21 @@ local function single_benchmark(
       end
    end
 
+   -- LuaJIT allocates GCtrace structures through the GC allocator when
+   -- compiling traces. Spec hooks (before/after) can overflow the trace cache
+   -- (default maxtrace=1000), causing the JIT to flush and recompile fn's
+   -- trace inside the measurement window — polluting both time and memory
+   -- readings. Flush stale traces from prior benchmarks and raise maxtrace
+   -- so hooks and fn can coexist without overflow.
+   if jit_flush and jit_opt_start and before then
+      jit_flush()
+      jit_opt_start("maxtrace=" .. JIT_MAXTRACE)
+   end
+
    -- For time benchmarks, calibrate iterations for statistical accuracy.
-   -- Calibration also serves as warmup (JIT compiled, caches hot).
+   -- Calibration also serves as JIT warmup (traces compiled, caches hot).
    -- For memory benchmarks, skip calibration (iterations don't improve accuracy
    -- and would cause hangs with low-precision clocks due to GC overhead).
-   -- Memory measurement is unaffected by JIT/cache warmup.
    local iterations = 1
    if suspend_gc then
       iterations = calibrate_iterations(fn, iteration_setup, iteration_teardown, get_ctx, params)
@@ -1022,10 +1022,6 @@ local function single_benchmark(
    local completed_rounds = 0
    local total_duration = 0
    local duration
-
-   if suspend_gc then
-      collectgarbage("stop")
-   end
 
    local function run_benchmark_loop()
       repeat
@@ -1047,7 +1043,12 @@ local function single_benchmark(
          or (rounds and completed_rounds == rounds)
    end
 
+   if suspend_gc then
+      collectgarbage("stop")
+   end
+
    local bench_ok, bench_err = pcall(run_benchmark_loop)
+
    collectgarbage("restart")
 
    if teardown then

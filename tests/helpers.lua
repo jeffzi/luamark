@@ -12,7 +12,6 @@ local function require_or_fail(name)
 end
 
 require_or_fail("chronos")
-require_or_fail("allocspy")
 local posix_time = require_or_fail("posix.time")
 
 local ALL_CLOCKS = { "chronos", "posix.time", "socket" }

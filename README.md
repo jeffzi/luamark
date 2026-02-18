@@ -12,7 +12,7 @@ execution time and memory usage with sensible defaults and optional high-precisi
 ## Features
 
 - **Measure time and memory** with optional precision via [Chronos][chronos],
-  [LuaPosix][luaposix], [LuaSocket][luasocket], or [AllocSpy][allocspy]
+  [LuaPosix][luaposix], or [LuaSocket][luasocket]
 - **Statistics**: median with 95% confidence intervals
 - **Standalone Timer**: `luamark.Timer()` for ad-hoc profiling outside benchmark
 - **Ready to use** with sensible defaults
@@ -20,13 +20,11 @@ execution time and memory usage with sensible defaults and optional high-precisi
 [chronos]: https://github.com/ldrumm/chronos
 [luaposix]: https://github.com/luaposix/luaposix
 [luasocket]: https://github.com/lunarmodules/luasocket
-[allocspy]: https://github.com/siffiejoe/lua-allocspy
 
 ## Requirements
 
 - Lua 5.1, 5.2, 5.3, 5.4, or LuaJIT 2.1
 - Optional: [chronos], [luaposix], or [luasocket] for enhanced timing precision
-- Optional: [AllocSpy][allocspy] for enhanced memory tracking
 
 ## Installation
 
@@ -245,8 +243,6 @@ LuaMark selects the best available clock:
 | 2        | [luaposix]          | nanosecond  | not available on macOS |
 | 3        | [luasocket]         | millisecond |                        |
 | 4        | os.clock (built-in) | varies      | fallback               |
-
-For memory, [AllocSpy][allocspy] provides byte-level precision when available.
 
 ## API Documentation
 

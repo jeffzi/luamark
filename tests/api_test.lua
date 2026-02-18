@@ -63,7 +63,7 @@ describe("suite API (compare_time/compare_memory)", function()
    test("params are passed to function and nested in results", function()
       local seen_n = {}
       local results = luamark.compare_time({
-         test = function(ctx, p)
+         test = function(_ctx, p)
             seen_n[p.n] = true
          end,
       }, {
@@ -102,7 +102,7 @@ describe("suite API (compare_time/compare_memory)", function()
    test("multiple params expand as cartesian product", function()
       local seen = {}
       luamark.compare_time({
-         test = function(ctx, p)
+         test = function(_ctx, p)
             seen[p.n .. "_" .. tostring(p.flag)] = true
          end,
       }, {
@@ -124,7 +124,7 @@ describe("suite API (compare_time/compare_memory)", function()
             setup_params = p
             return {}
          end,
-         teardown = function(ctx, p)
+         teardown = function(_ctx, p)
             teardown_params = p
          end,
          rounds = 1,
