@@ -21,16 +21,16 @@ local jit_opt_start = jit and jit.opt and jit.opt.start
 -- ----------------------------------------------------------------------------
 
 -- Config defaults balance accuracy vs runtime across function speeds:
--- (config.time=1s, config.rounds=100, MAX_ROUNDS=100, RESAMPLES=5000)
+-- (config.time=1s, config.rounds=100, MAX_ROUNDS=1000, RESAMPLES=5000)
 --
--- | Function    | Duration | Rounds | Iterations | Bootstrap | Total |
--- |-------------|----------|--------|------------|-----------|-------|
--- | Very fast   | ~1μs     | 100    | 1,000+     | ~5ms      | ~10ms |
--- | Fast        | ~100μs   | 100    | 1          | ~5ms      | ~15ms |
--- | Medium      | ~10ms    | 100    | 1          | ~5ms      | ~1s   |
--- | Slow        | ~500ms   | 100    | 1          | ~5ms      | ~50s  |
+-- | Function    | Duration | Rounds | Iterations | Bootstrap | Total  |
+-- |-------------|----------|--------|------------|-----------|--------|
+-- | Very fast   | ~1μs     | 1,000  | 1,000+     | ~50ms     | ~1s    |
+-- | Fast        | ~100μs   | 1,000  | 1          | ~50ms     | ~150ms |
+-- | Medium      | ~10ms    | 100    | 1          | ~5ms      | ~1s    |
+-- | Slow        | ~500ms   | 100    | 1          | ~5ms      | ~50s   |
 --
--- MAX_ROUNDS caps fast functions to ensure consistent sample count.
+-- MAX_ROUNDS caps total rounds to keep bootstrap CI computation tractable.
 -- BOOTSTRAP_RESAMPLES (5k) provides accurate 95% CI for median.
 
 local BOOTSTRAP_RESAMPLES = 5000
@@ -40,7 +40,7 @@ local MEMORY_PRECISION = 4
 local JIT_MAXTRACE = 20000
 local MAX_CALIBRATION_ATTEMPTS = 10
 local MAX_ITERATIONS = 1e6
-local MAX_ROUNDS = 100
+local MAX_ROUNDS = 1000
 
 local config = {
    rounds = 100,
