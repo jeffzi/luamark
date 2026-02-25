@@ -2,14 +2,24 @@
   "name": "luamark-types",
   "version": "1.0.1",
   "description": "TypeScript-to-Lua type declarations for luamark",
-  "types": "index.d.ts",
-  "files": ["**/*.d.ts"],
+  "types": "ts-types/index.d.ts",
+  "files": [
+    "ts-types/**/*.d.ts"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/jeffzi/luamark"
   },
+  "scripts": {
+    "test:types": "tsc --noEmit -p ts-types/tsconfig.test-types.json"
+  },
   "peerDependencies": {
     "typescript-to-lua": ">=1.30.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.4",
+    "expect-type": "^1.0.0",
+    "typescript": "^5.4.0"
   }
 }

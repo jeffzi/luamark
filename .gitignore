@@ -42,3 +42,7 @@ luac.out
 # Coverage
 luacov.*.out
 luacov_report.html*
+
+# Node
+node_modules/
+package-lock.json

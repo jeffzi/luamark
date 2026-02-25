@@ -2,8 +2,6 @@
 /// <reference types="@typescript-to-lua/language-extensions" />
 
 declare module "luamark" {
-  type ParamValue = string | number | boolean;
-
   interface BaseStats {
     readonly median: number;
     readonly ci_lower: number;
@@ -24,7 +22,9 @@ declare module "luamark" {
     readonly is_approximate?: boolean;
   }
 
-  interface Result extends BaseStats {
+  interface Result<
+    P extends Record<string, string | number | boolean> = Record<string, string | number | boolean>,
+  > extends BaseStats {
     readonly name: string;
     readonly rounds: number;
     readonly iterations: number;
@@ -32,28 +32,35 @@ declare module "luamark" {
     readonly unit: "s" | "kb";
     readonly ops?: number;
     readonly is_approximate?: boolean;
-    readonly params: Record<string, ParamValue>;
+    readonly params: P;
   }
 
-  interface Options {
+  interface Options<Ctx = unknown> {
     rounds?: number;
     time?: number;
-    setup?: (this: void) => unknown;
-    teardown?: (this: void, ctx?: unknown) => void;
+    setup?: (this: void) => Ctx;
+    teardown?: (this: void, ctx: Ctx) => void;
   }
 
-  interface SuiteOptions {
+  interface SuiteOptions<
+    Ctx = unknown,
+    P extends Record<string, string | number | boolean> = Record<string, string | number | boolean>,
+  > {
     rounds?: number;
     time?: number;
-    setup?: (this: void, params: Record<string, ParamValue>) => unknown;
-    teardown?: (this: void, ctx: unknown, params: Record<string, ParamValue>) => void;
-    params?: Record<string, ParamValue[]>;
+    setup?: (this: void, params: P) => Ctx;
+    teardown?: (this: void, ctx: Ctx, params: P) => void;
+    params?: { [K in keyof P]: P[K][] };
   }
 
-  interface Spec {
-    fn: (this: void, ctx?: unknown, params?: Record<string, ParamValue>) => void;
-    before?: (this: void, ctx?: unknown, params?: Record<string, ParamValue>) => unknown;
-    after?: (this: void, ctx?: unknown, params?: Record<string, ParamValue>) => void;
+  interface Spec<
+    Ctx = unknown,
+    P extends Record<string, string | number | boolean> = Record<string, string | number | boolean>,
+  > {
+    fn: (this: void, ctx: Ctx, params: P) => void;
+    // biome-ignore lint/suspicious/noConfusingVoidType: models Lua's `before(ctx, p) or ctx` — void means "no new ctx"
+    before?: (this: void, ctx: Ctx, params: P) => Ctx | void;
+    after?: (this: void, ctx: Ctx, params: P) => void;
     baseline?: boolean;
   }
 
@@ -73,33 +80,44 @@ declare module "luamark" {
   const _VERSION: string;
 
   // Functions
-  function timeit(
+  function timeit<Ctx = unknown>(
     this: void,
-    fn: (this: void, ctx?: unknown, params?: Record<string, ParamValue>) => void,
-    opts?: Options,
+    fn: NoInfer<(this: void, ctx: Ctx) => void>,
+    opts?: Options<Ctx>,
   ): Stats;
 
-  function memit(
+  function memit<Ctx = unknown>(
     this: void,
-    fn: (this: void, ctx?: unknown, params?: Record<string, ParamValue>) => void,
-    opts?: Options,
+    fn: NoInfer<(this: void, ctx: Ctx) => void>,
+    opts?: Options<Ctx>,
   ): Stats;
 
-  function compare_time(
+  function compare_time<
+    Ctx = unknown,
+    P extends Record<string, string | number | boolean> = Record<string, string | number | boolean>,
+  >(
     this: void,
-    funcs: Record<string, ((this: void, ctx?: unknown, params?: Record<string, ParamValue>) => void) | Spec>,
-    opts?: SuiteOptions,
-  ): Result[];
+    funcs: NoInfer<Record<string, ((this: void, ctx: Ctx, params: P) => void) | Spec<Ctx, P>>>,
+    opts?: SuiteOptions<Ctx, P>,
+  ): Result<P>[];
 
-  function compare_memory(
+  function compare_memory<
+    Ctx = unknown,
+    P extends Record<string, string | number | boolean> = Record<string, string | number | boolean>,
+  >(
     this: void,
-    funcs: Record<string, ((this: void, ctx?: unknown, params?: Record<string, ParamValue>) => void) | Spec>,
-    opts?: SuiteOptions,
-  ): Result[];
+    funcs: NoInfer<Record<string, ((this: void, ctx: Ctx, params: P) => void) | Spec<Ctx, P>>>,
+    opts?: SuiteOptions<Ctx, P>,
+  ): Result<P>[];
 
   function Timer(this: void): Timer;
 
-  function render(this: void, results: Stats | Result[], short?: boolean, max_width?: number): string;
+  function render(
+    this: void,
+    results: Stats | Result[],
+    short?: boolean,
+    max_width?: number,
+  ): string;
 
   function humanize_time(this: void, s: number): string;
 
