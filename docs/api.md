@@ -1,5 +1,36 @@
 # luamark
 
+## Table of Contents
+
+- [API Overview](#api-overview)
+- [Single API](#single-api)
+  - [timeit](#timeit)
+  - [memit](#memit)
+  - [Stats](#stats)
+  - [Options](#options)
+- [Suite API](#suite-api)
+  - [compare\_time](#compare_time)
+  - [compare\_memory](#compare_memory)
+  - [SuiteOptions](#suiteoptions)
+  - [Spec](#spec)
+  - [params](#params)
+  - [Result](#result)
+- [Timer](#timer)
+  - [timer.start()](#timerstart)
+  - [timer.stop()](#timerstop)
+  - [timer.elapsed()](#timerelapsed)
+  - [timer.reset()](#timerreset)
+- [Utility Functions](#utility-functions)
+  - [render](#render)
+  - [humanize\_time](#humanize_time)
+  - [humanize\_memory](#humanize_memory)
+  - [humanize\_count](#humanize_count)
+  - [unload](#unload)
+- [Configuration](#configuration)
+  - [clock\_name](#clock_name)
+
+---
+
 ## API Overview
 
 luamark provides two API styles: **Single** (benchmark one function) and **Suite**
