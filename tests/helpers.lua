@@ -12,10 +12,11 @@ local function require_or_fail(name)
 end
 
 require_or_fail("chronos")
-local posix_time = require_or_fail("posix.time")
 
-local ALL_CLOCKS = { "chronos", "posix.time", "socket" }
-local CLOCKS = posix_time.clock_gettime and ALL_CLOCKS or { "chronos", "socket" }
+local has_posix, posix_time = pcall(original_require, "posix.time")
+
+local ALL_CLOCKS = has_posix and { "chronos", "posix.time", "socket" } or { "chronos", "socket" }
+local CLOCKS = (has_posix and posix_time.clock_gettime) and ALL_CLOCKS or { "chronos", "socket" }
 
 --- Return all clocks except the specified one.
 ---@param clock_name string Clock to keep.

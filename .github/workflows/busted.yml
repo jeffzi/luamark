@@ -7,7 +7,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        luaVersion: ["5.4", "5.3", "5.2", "5.1", "luajit-2.1"]
+        luaVersion: ["5.5.0", "5.4", "5.3", "5.2", "5.1", "luajit-2.1"]
         os: [ubuntu-latest]
 
     runs-on: ${{ matrix.os }}
@@ -27,8 +27,11 @@ jobs:
         run: |
           luarocks install busted
           luarocks install chronos
-          luarocks install luaposix
           luarocks install luasocket
+
+      - name: Setup luaposix
+        if: ${{ !startsWith(matrix.luaVersion, '5.5') }}
+        run: luarocks install luaposix
 
       - name: Run tests
         run: busted
