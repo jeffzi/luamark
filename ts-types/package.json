@@ -1,0 +1,15 @@
+{
+  "name": "luamark-types",
+  "version": "1.0.1",
+  "description": "TypeScript-to-Lua type declarations for luamark",
+  "types": "index.d.ts",
+  "files": ["**/*.d.ts"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jeffzi/luamark"
+  },
+  "peerDependencies": {
+    "typescript-to-lua": ">=1.30.0"
+  }
+}
