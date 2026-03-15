@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Defold compatibility (desktop and HTML5) with CI verification.
+
+### Fixed
+
+- Fall through to `os.clock` when a clock module exists but lacks the expected
+  function (e.g., socket without `gettime`).
+- Low-precision clock warning no longer crashes when `io.stderr` is unavailable;
+  falls back to `print()`.
+
 ## [v1.0.2] - 2026-03-15
 
 ### Added
