@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Sort numeric parameters numerically instead of lexicographically in rendered
+  output.
+
 ## [v1.0.1] - 2026-02-18
 
 ### Changed

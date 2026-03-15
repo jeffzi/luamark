@@ -1335,6 +1335,26 @@ local function render_unit_group(unit_results, format, max_width)
       groups[p][#groups[p] + 1] = unit_results[i]
    end
 
+   local sort_keys = {}
+   for i = 1, #order do
+      local p = order[i]
+      local k = {}
+      for j = 1, #param_names do
+         local v = p[param_names[j]]
+         k[j] = tonumber(v) or tostring(v)
+      end
+      sort_keys[p] = k
+   end
+   table_sort(order, function(a, b)
+      local ka, kb = sort_keys[a], sort_keys[b]
+      for i = 1, #ka do
+         if ka[i] ~= kb[i] then
+            return ka[i] < kb[i]
+         end
+      end
+      return false
+   end)
+
    if #order == 1 then
       return render_summary(groups[order[1]], format, max_width)
    end

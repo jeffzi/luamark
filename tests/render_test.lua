@@ -197,6 +197,26 @@ describe("render", function()
       assert.are_equal(2, n20_count)
    end)
 
+   test("numeric params are sorted numerically, not lexicographically", function()
+      local p1 = { k = 1 }
+      local p12 = { k = 12 }
+      local p2 = { k = 2 }
+      -- Feed results in lexicographic order (1, 12, 2) to trigger the bug
+      local results = {
+         h.make_result_row("fn", 0.001, 1, 1, { params = p1 }),
+         h.make_result_row("fn", 0.001, 1, 1, { params = p12 }),
+         h.make_result_row("fn", 0.001, 1, 1, { params = p2 }),
+      }
+      local output = luamark.render(results)
+
+      -- k=2 must appear before k=12 (numeric order)
+      local pos2 = output:find("k=2")
+      local pos12 = output:find("k=12")
+      assert.is_truthy(pos2)
+      assert.is_truthy(pos12)
+      assert.is_true(pos2 < pos12)
+   end)
+
    test("single unit results do not show unit header", function()
       local results = { h.make_result_row("a", 0.001, 1, 1) }
       local output = luamark.render(results)
