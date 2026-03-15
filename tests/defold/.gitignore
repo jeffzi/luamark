@@ -1,0 +1,7 @@
+luamark.lua
+.defold/
+.editor_settings
+.internal/
+build/
+manifest.private.der
+manifest.public.der

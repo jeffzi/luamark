@@ -1,0 +1,4 @@
+key_trigger {
+  input: KEY_ESC
+  action: "exit"
+}

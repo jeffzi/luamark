@@ -1,0 +1,17 @@
+[project]
+title = luamark-defold-test
+
+[display]
+width = 960
+height = 640
+
+[bootstrap]
+main_collection = /main/main.collectionc
+
+[script]
+shared_state = 1
+
+[library]
+
+[input]
+game_binding = /input/game.input_bindingc

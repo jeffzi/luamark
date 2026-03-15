@@ -1,4 +1,4 @@
----@diagnostic disable: undefined-field, unused-local, invisible, different-requires
+---@diagnostic disable: undefined-field, unused-local, invisible, different-requires, duplicate-set-field
 
 local h = require("tests.helpers")
 local socket = require("socket")
@@ -367,5 +367,63 @@ describe("clock warning", function()
 
       assert.matches("luamark: using os.clock", first_output)
       assert.are_equal("", second_output)
+   end)
+end)
+
+describe("restricted environment", function()
+   test("falls through to os.clock when socket module lacks gettime", function()
+      _G._TEST = true
+      package.loaded["luamark"] = nil
+      package.loaded["chronos"] = nil
+      package.loaded["posix.time"] = nil
+      package.loaded["socket"] = nil
+
+      local original_req = _G.require
+      _G.require = function(name)
+         if name == "chronos" or name == "posix.time" then
+            error("module '" .. name .. "' not found")
+         end
+         if name == "socket" then
+            return {}
+         end
+         return original_req(name)
+      end
+
+      finally(function()
+         _G.require = original_req
+      end)
+
+      local luamark = require("luamark")
+
+      assert.are_equal("os.clock", luamark.clock_name)
+   end)
+
+   test("warns via print when io.stderr is unavailable", function()
+      local original_io = _G.io
+      local original_warn = _G.warn
+      local original_print = _G.print
+      local print_output = {}
+
+      finally(function()
+         _G.io = original_io
+         _G.warn = original_warn
+         _G.print = original_print
+      end)
+
+      local luamark = h.load_luamark(h.ALL_CLOCKS)
+      assert.are_equal("os.clock", luamark.clock_name)
+
+      _G.io = nil
+      _G.warn = nil
+      _G.print = function(msg)
+         print_output[#print_output + 1] = msg
+      end
+
+      assert.has_no_error(function()
+         luamark.timeit(h.noop, { rounds = 1 })
+      end)
+
+      local output = table.concat(print_output)
+      assert.matches("luamark: using os.clock", output)
    end)
 end)

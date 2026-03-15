@@ -103,7 +103,7 @@ for _, name in ipairs(CLOCK_PRIORITIES) do
    local is_installed, module = pcall(require, name)
    if is_installed then
       local ok, new_clock, new_precision = pcall(CLOCKS[name], module)
-      if ok then
+      if ok and new_clock then
          clock, clock_precision = new_clock, new_precision
          luamark.clock_name = name
          break
@@ -127,8 +127,10 @@ local function warn_low_precision_clock()
    ---@diagnostic disable-next-line: deprecated
    if warn then
       warn(msg) ---@diagnostic disable-line: deprecated
-   else
+   elseif io and io.stderr then
       io.stderr:write(msg)
+   else
+      print(msg)
    end
 end
 

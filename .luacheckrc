@@ -1,5 +1,6 @@
 std = "min"
 include_files = { "src", "tests" }
+exclude_files = { "tests/defold" }
 globals = {
    "_G",
    "jit", -- LuaJIT

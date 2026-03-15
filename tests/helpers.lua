@@ -1,4 +1,4 @@
----@diagnostic disable: undefined-field, unused-local, invisible, different-requires
+---@diagnostic disable: undefined-field, unused-local, invisible, different-requires, duplicate-set-field
 
 local original_require = require
 
