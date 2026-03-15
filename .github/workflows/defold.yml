@@ -10,10 +10,8 @@ jobs:
         include:
           - platform: x86_64-linux
             name: desktop
-            headless: true
           - platform: js-web
             name: html5
-            headless: false
 
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
@@ -44,14 +42,29 @@ jobs:
           --platform ${{ matrix.platform }}
           resolve build --archive
 
-      - name: Bundle (html5)
-        if: ${{ !matrix.headless }}
-        run: >-
-          java -jar "$BOB"
-          --platform ${{ matrix.platform }}
-          bundle --bundle-output bundle
-
-      - name: Run headless test
-        if: ${{ matrix.headless }}
+      - name: Run desktop headless test
+        if: matrix.platform == 'x86_64-linux'
         timeout-minutes: 5
         run: dmengine_headless
+
+      - name: Bundle html5
+        if: matrix.platform == 'js-web'
+        run: >-
+          java -jar "$BOB"
+          --platform js-web
+          bundle --bundle-output bundle
+
+      - name: Setup Node.js
+        if: matrix.platform == 'js-web'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Playwright
+        if: matrix.platform == 'js-web'
+        run: npm install playwright && npx playwright install --with-deps chromium
+
+      - name: Run html5 headless test
+        if: matrix.platform == 'js-web'
+        timeout-minutes: 5
+        run: node test_html5.mjs

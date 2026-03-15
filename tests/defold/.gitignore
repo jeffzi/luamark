@@ -3,5 +3,9 @@ luamark.lua
 .editor_settings
 .internal/
 build/
+bundle/
 manifest.private.der
 manifest.public.der
+node_modules/
+package.json
+package-lock.json

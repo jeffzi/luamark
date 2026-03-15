@@ -113,11 +113,24 @@ function init(self)
 
    print("")
    print(string.format("=== Results: %d/%d passed ===", passed, total))
+   local exit_code
    if passed == total then
       print("luamark is fully compatible with Defold!")
-      os.exit(0)
+      exit_code = 0
    else
       print("Some tests failed. Check output above.")
-      os.exit(1)
+      exit_code = 1
+   end
+
+   -- Signal result to the environment.
+   -- Desktop: os.exit for CI headless runner.
+   -- HTML5: set document.title for Playwright (engine runs in a worker,
+   -- so print() output is not visible to the browser's main-thread console).
+   local sysname = sys.get_sys_info().system_name
+   if sysname == "HTML5" then
+      local status = exit_code == 0 and "PASS" or "FAIL"
+      html5.run("document.title = '" .. status .. " " .. passed .. "/" .. total .. "'")
+   else
+      os.exit(exit_code)
    end
 end
