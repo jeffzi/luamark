@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Defold compatibility (desktop and HTML5) with CI verification.
+- Love2D compatibility with CI verification; automatically uses `love.timer`
+  for microsecond-precision wall-time clock.
 
 ### Fixed
 
