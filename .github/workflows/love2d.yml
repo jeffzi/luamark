@@ -1,0 +1,24 @@
+name: Love2D
+
+on: [push, pull_request]
+
+jobs:
+  love2d:
+    name: desktop
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Love2D
+        uses: remarkablegames/setup-love@v1
+        with:
+          version: "11.5"
+
+      - name: Copy luamark source
+        run: bash tests/love2d/setup.sh
+
+      - name: Run headless test
+        timeout-minutes: 5
+        run: love tests/love2d

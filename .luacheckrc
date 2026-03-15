@@ -1,9 +1,10 @@
 std = "min"
 include_files = { "src", "tests" }
-exclude_files = { "tests/defold" }
+exclude_files = { "tests/defold", "tests/love2d" }
 globals = {
    "_G",
    "jit", -- LuaJIT
+   "love", -- Love2D
    "warn", -- Lua 5.4+
 }
 max_comment_line_length = 200

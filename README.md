@@ -3,6 +3,8 @@
 [![prek](https://img.shields.io/badge/prek-enabled-brightgreen?logo=pre-commit)](https://github.com/j178/prek)
 [![Busted](https://github.com/jeffzi/luamark/actions/workflows/busted.yml/badge.svg)](https://github.com/jeffzi/luamark/actions/workflows/busted.yml)
 [![Luacheck](https://github.com/jeffzi/luamark/actions/workflows/luacheck.yml/badge.svg)](https://github.com/jeffzi/luamark/actions/workflows/luacheck.yml)
+[![Defold](https://github.com/jeffzi/luamark/actions/workflows/defold.yml/badge.svg)](https://github.com/jeffzi/luamark/actions/workflows/defold.yml)
+[![Love2D](https://github.com/jeffzi/luamark/actions/workflows/love2d.yml/badge.svg)](https://github.com/jeffzi/luamark/actions/workflows/love2d.yml)
 [![Luarocks](https://img.shields.io/luarocks/v/jeffzi/luamark?label=Luarocks&logo=Lua)](https://luarocks.org/modules/jeffzi/luamark)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -23,7 +25,9 @@ execution time and memory usage with sensible defaults and optional high-precisi
 
 ## Requirements
 
-- Lua 5.1, 5.2, 5.3, 5.4, or LuaJIT 2.1
+- Lua 5.1, 5.2, 5.3, 5.4, 5.5, or LuaJIT 2.1
+- Compatible with game engines: [Defold](https://defold.com/)
+  and [Love2D](https://love2d.org/)
 - Optional: [chronos], [luaposix], or [luasocket] for enhanced timing precision
 
 ## Installation
@@ -237,12 +241,13 @@ system noise.
 
 LuaMark selects the best available clock:
 
-| Priority | Module              | Precision   | Notes                  |
-| -------- | ------------------- | ----------- | ---------------------- |
-| 1        | [chronos]           | nanosecond  | recommended            |
-| 2        | [luaposix]          | nanosecond  | not available on macOS |
-| 3        | [luasocket]         | millisecond |                        |
-| 4        | os.clock (built-in) | varies      | fallback               |
+| Priority | Module              | Precision   | Notes                   |
+| -------- | ------------------- | ----------- | ----------------------- |
+| 1        | [chronos]           | nanosecond  | recommended             |
+| 2        | [luaposix]          | nanosecond  | not available on macOS  |
+| 3        | [luasocket]         | millisecond |                         |
+| 4        | love.timer          | microsecond | auto-detected in Love2D |
+| 5        | os.clock (built-in) | varies      | fallback                |
 
 ## API Documentation
 

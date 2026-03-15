@@ -1,0 +1,125 @@
+-- Luamark Love2D compatibility test.
+-- Run: love tests/love2d
+-- Check the console for test results.
+
+local luamark = require("luamark")
+
+local passed, total = 0, 0
+
+local function test(name, fn)
+   total = total + 1
+   local ok, err = pcall(fn)
+   if ok then
+      print("[PASS] " .. name)
+      passed = passed + 1
+   else
+      print("[FAIL] " .. name .. ": " .. tostring(err))
+   end
+end
+
+function love.load() -- luacheck: ignore love
+   print("=== luamark Love2D compatibility test ===")
+   print("Lua version: " .. _VERSION)
+   print("LuaJIT: " .. (jit and jit.version or "not available"))
+   print("luamark version: " .. luamark._VERSION)
+   print("Clock: " .. luamark.clock_name)
+   print("")
+
+   test("timeit benchmarks a function", function()
+      local stats = luamark.timeit(function()
+         local sum = 0
+         for i = 1, 1000 do
+            sum = sum + i
+         end
+      end, { rounds = 5 })
+      assert(stats.median > 0, "median should be > 0")
+      assert(stats.rounds == 5, "rounds should be 5")
+   end)
+
+   test("memit benchmarks memory", function()
+      local stats = luamark.memit(function()
+         local t = {}
+         for i = 1, 100 do
+            t[i] = string.rep("x", 100)
+         end
+      end, { rounds = 5 })
+      assert(stats.median >= 0, "median should be >= 0")
+   end)
+
+   test("compare_time compares functions", function()
+      local results = luamark.compare_time({
+         concat = function()
+            local s = ""
+            for i = 1, 100 do
+               s = s .. tostring(i)
+            end
+         end,
+         table_concat = function()
+            local t = {}
+            for i = 1, 100 do
+               t[i] = tostring(i)
+            end
+            local _ = table.concat(t)
+         end,
+      }, { rounds = 5 })
+      assert(#results == 2, "should have 2 results")
+      assert(results[1].rank ~= nil, "results should have rank")
+   end)
+
+   test("render formats single stats", function()
+      local stats = luamark.timeit(function() end, { rounds = 5 })
+      local output = luamark.render(stats)
+      assert(type(output) == "string", "render should return string")
+      assert(#output > 0, "render output should not be empty")
+      print("  output:\n" .. output)
+   end)
+
+   test("render formats comparison table", function()
+      local results = luamark.compare_time({
+         loop = function()
+            local sum = 0
+            for i = 1, 1000 do
+               sum = sum + i
+            end
+         end,
+         unrolled = function()
+            local _ = 1 + 2 + 3 + 4 + 5
+         end,
+      }, { rounds = 10 })
+      local full = luamark.render(results)
+      local compact = luamark.render(results, true)
+      assert(full:find("Name"), "full table should have Name header")
+      assert(compact:find("|"), "compact should have bar chart")
+      print("  full table:\n" .. full)
+      print("  compact:\n" .. compact)
+   end)
+
+   test("Timer works", function()
+      local timer = luamark.Timer()
+      timer.start()
+      local elapsed = timer.stop()
+      assert(elapsed >= 0, "elapsed should be >= 0")
+      timer.reset()
+      assert(timer.elapsed() == 0, "elapsed should be 0 after reset")
+   end)
+
+   test("humanize functions work", function()
+      assert(luamark.humanize_time(0.001) == "1ms", "expected 1ms")
+      assert(luamark.humanize_memory(1024) == "1MB", "expected 1MB")
+      assert(luamark.humanize_count(1000) == "1k", "expected 1k")
+   end)
+
+   test("love.timer clock is detected", function()
+      assert(luamark.clock_name == "love.timer", "expected love.timer, got " .. luamark.clock_name)
+   end)
+
+   print("")
+   print(string.format("=== Results: %d/%d passed ===", passed, total))
+   if passed == total then
+      print("luamark is fully compatible with Love2D!")
+      love.event.quit(0)
+   else
+      print("Some tests failed. Check output above.")
+      love.event.quit(1)
+   end
+end

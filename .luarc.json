@@ -3,7 +3,7 @@
   "runtime.version": "Lua 5.1",
   "indent_style": "space",
   "indent_size": "3",
-  "workspace.ignoreDir": [".vscode", "tests/defold"],
+  "workspace.ignoreDir": [".vscode", "tests/defold", "tests/love2d"],
   "workspace.checkThirdParty": false,
   "workspace.library": [
     "${3rd}/luassert/library",

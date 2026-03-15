@@ -398,6 +398,44 @@ describe("restricted environment", function()
       assert.are_equal("os.clock", luamark.clock_name)
    end)
 
+   test("uses love.timer when available and no require-based clocks", function()
+      local original_love = _G.love
+
+      finally(function()
+         _G.love = original_love
+      end)
+
+      _G.love = {
+         timer = {
+            getTime = function()
+               return os.clock()
+            end,
+         },
+      }
+
+      local luamark = h.load_luamark(h.ALL_CLOCKS)
+      assert.are_equal("love.timer", luamark.clock_name)
+   end)
+
+   test("prefers require-based clocks over love.timer", function()
+      local original_love = _G.love
+
+      finally(function()
+         _G.love = original_love
+      end)
+
+      _G.love = {
+         timer = {
+            getTime = function()
+               return os.clock()
+            end,
+         },
+      }
+
+      local luamark = h.load_luamark()
+      assert.are_equal("chronos", luamark.clock_name)
+   end)
+
    test("warns via print when io.stderr is unavailable", function()
       local original_io = _G.io
       local original_warn = _G.warn

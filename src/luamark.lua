@@ -111,6 +111,16 @@ for _, name in ipairs(CLOCK_PRIORITIES) do
    end
 end
 
+if
+   not luamark.clock_name
+   and type(love) == "table"
+   and love.timer
+   and type(love.timer.getTime) == "function"
+then
+   clock, clock_precision = love.timer.getTime, 6
+   luamark.clock_name = "love.timer"
+end
+
 if not luamark.clock_name then
    clock, clock_precision = os.clock, 3
    luamark.clock_name = "os.clock"
