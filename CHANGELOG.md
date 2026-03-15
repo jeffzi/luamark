@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Lua 5.5 support.
+
 ### Fixed
 
 - Sort numeric parameters numerically instead of lexicographically in rendered
