@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.1.0] - 2026-03-16
+
 ### Added
 
 - Defold compatibility (desktop and HTML5) with CI verification.
@@ -192,7 +194,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release. LuaMark is a portable microbenchmarking library for Lua that
   precisely measures execution time and memory usage.
 
-[Unreleased]: https://github.com/jeffzi/luamark/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/jeffzi/luamark/compare/v1.1.0...HEAD
+[v1.1.0]: https://github.com/jeffzi/luamark/compare/v1.0.2...v1.1.0
 [v1.0.2]: https://github.com/jeffzi/luamark/compare/v1.0.1...v1.0.2
 [v1.0.1]: https://github.com/jeffzi/luamark/compare/v1.0.0...v1.0.1
 [v1.0.0]: https://github.com/jeffzi/luamark/compare/v0.9.1...v1.0.0
