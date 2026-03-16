@@ -112,7 +112,7 @@ for _, name in ipairs(CLOCK_PRIORITIES) do
 end
 
 if
-   not luamark.clock_name
+   (not luamark.clock_name or luamark.clock_name == "socket")
    and type(love) == "table"
    and love.timer
    and type(love.timer.getTime) == "function"

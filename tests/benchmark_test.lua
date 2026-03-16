@@ -417,7 +417,26 @@ describe("restricted environment", function()
       assert.are_equal("love.timer", luamark.clock_name)
    end)
 
-   test("prefers require-based clocks over love.timer", function()
+   test("prefers love.timer over socket", function()
+      local original_love = _G.love
+
+      finally(function()
+         _G.love = original_love
+      end)
+
+      _G.love = {
+         timer = {
+            getTime = function()
+               return os.clock()
+            end,
+         },
+      }
+
+      local luamark = h.load_luamark(h.clocks_except("socket"))
+      assert.are_equal("love.timer", luamark.clock_name)
+   end)
+
+   test("prefers high-precision clocks over love.timer", function()
       local original_love = _G.love
 
       finally(function()
