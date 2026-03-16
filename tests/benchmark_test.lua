@@ -398,7 +398,7 @@ describe("restricted environment", function()
       assert.are_equal("os.clock", luamark.clock_name)
    end)
 
-   test("uses love.timer when available and no require-based clocks", function()
+   test("love.timer detection respects clock priority", function()
       local original_love = _G.love
 
       finally(function()
@@ -413,46 +413,17 @@ describe("restricted environment", function()
          },
       }
 
-      local luamark = h.load_luamark(h.ALL_CLOCKS)
-      assert.are_equal("love.timer", luamark.clock_name)
-   end)
+      -- Detected when no require-based clocks available
+      local lm = h.load_luamark(h.ALL_CLOCKS)
+      assert.are_equal("love.timer", lm.clock_name)
 
-   test("prefers love.timer over socket", function()
-      local original_love = _G.love
+      -- Overrides socket (lower precision)
+      lm = h.load_luamark(h.clocks_except("socket"))
+      assert.are_equal("love.timer", lm.clock_name)
 
-      finally(function()
-         _G.love = original_love
-      end)
-
-      _G.love = {
-         timer = {
-            getTime = function()
-               return os.clock()
-            end,
-         },
-      }
-
-      local luamark = h.load_luamark(h.clocks_except("socket"))
-      assert.are_equal("love.timer", luamark.clock_name)
-   end)
-
-   test("prefers high-precision clocks over love.timer", function()
-      local original_love = _G.love
-
-      finally(function()
-         _G.love = original_love
-      end)
-
-      _G.love = {
-         timer = {
-            getTime = function()
-               return os.clock()
-            end,
-         },
-      }
-
-      local luamark = h.load_luamark()
-      assert.are_equal("chronos", luamark.clock_name)
+      -- Does not override high-precision clocks (chronos, posix.time)
+      lm = h.load_luamark()
+      assert.are_equal("chronos", lm.clock_name)
    end)
 
    test("warns via print when io.stderr is unavailable", function()
