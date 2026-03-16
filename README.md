@@ -245,8 +245,8 @@ LuaMark selects the best available clock:
 | -------- | ------------------- | ----------- | ----------------------- |
 | 1        | [chronos]           | nanosecond  | recommended             |
 | 2        | [luaposix]          | nanosecond  | not available on macOS  |
-| 3        | [luasocket]         | millisecond |                         |
-| 4        | love.timer          | microsecond | auto-detected in Love2D |
+| 3        | love.timer          | microsecond | auto-detected in Love2D |
+| 4        | [luasocket]         | millisecond |                         |
 | 5        | os.clock (built-in) | varies      | fallback                |
 
 ## API Documentation
