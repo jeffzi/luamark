@@ -224,4 +224,21 @@ describe("render", function()
       assert.not_matches("^Time", output)
       assert.not_matches("^Memory", output)
    end)
+
+   test("groups rows by param values not table identity", function()
+      -- Each row gets its own {n=10} or {n=20} table (distinct references, same values).
+      local results = {
+         h.make_result_row("baseline", 0.001, 1, 1, { params = { n = 10 } }),
+         h.make_result_row("candidate", 0.002, 2, 2, { params = { n = 10 } }),
+         h.make_result_row("baseline", 0.003, 1, 1, { params = { n = 20 } }),
+         h.make_result_row("candidate", 0.004, 2, 2, { params = { n = 20 } }),
+      }
+
+      local output = luamark.render(results)
+
+      -- Two unique param combos -> two param-group tables -> two "Name" headers.
+      -- Bug: reference-based grouping creates one table per row -> four "Name" headers.
+      local _, name_header_count = output:gsub("Name", "")
+      assert.are_equal(2, name_header_count)
+   end)
 end)

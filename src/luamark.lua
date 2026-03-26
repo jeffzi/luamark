@@ -1335,28 +1335,26 @@ end
 local function render_unit_group(unit_results, format, max_width)
    local param_names = collect_param_names(unit_results)
 
-   -- Group by params table identity (avoids reformatting each row)
+   -- Group by params values (string key) so distinct tables with equal values merge
    local groups = {}
    local order = {}
+   local sort_keys = {}
    for i = 1, #unit_results do
       local p = unit_results[i].params or EMPTY_PARAMS
-      if not groups[p] then
-         groups[p] = {}
-         order[#order + 1] = p
+      local key = format_params(p, param_names)
+      if not groups[key] then
+         groups[key] = {}
+         order[#order + 1] = key
+         local k = {}
+         for j = 1, #param_names do
+            local v = p[param_names[j]]
+            k[j] = tonumber(v) or tostring(v)
+         end
+         sort_keys[key] = k
       end
-      groups[p][#groups[p] + 1] = unit_results[i]
+      groups[key][#groups[key] + 1] = unit_results[i]
    end
 
-   local sort_keys = {}
-   for i = 1, #order do
-      local p = order[i]
-      local k = {}
-      for j = 1, #param_names do
-         local v = p[param_names[j]]
-         k[j] = tonumber(v) or tostring(v)
-      end
-      sort_keys[p] = k
-   end
    table_sort(order, function(a, b)
       local ka, kb = sort_keys[a], sort_keys[b]
       for i = 1, #ka do
@@ -1373,12 +1371,11 @@ local function render_unit_group(unit_results, format, max_width)
 
    local output = {}
    for i = 1, #order do
-      local p = order[i]
-      local header = format_params(p, param_names)
-      if header ~= "" then
-         output[#output + 1] = header
+      local key = order[i]
+      if key ~= "" then
+         output[#output + 1] = key
       end
-      output[#output + 1] = render_summary(groups[p], format, max_width)
+      output[#output + 1] = render_summary(groups[key], format, max_width)
       if i < #order then
          output[#output + 1] = ""
       end
