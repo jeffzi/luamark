@@ -424,13 +424,12 @@ local function render_stats(stats)
    local unit = stats.unit
    local lines = {
       "Median: " .. humanize(stats.median, unit),
-      "CI: "
-         .. humanize(stats.ci_lower, unit)
-         .. " - "
-         .. humanize(stats.ci_upper, unit)
-         .. " (± "
-         .. humanize(stats.ci_margin, unit)
-         .. ")",
+      string.format(
+         "CI: %s - %s (± %s)",
+         humanize(stats.ci_lower, unit),
+         humanize(stats.ci_upper, unit),
+         humanize(stats.ci_margin, unit)
+      ),
    }
    if stats.ops then
       lines[#lines + 1] = "Ops: " .. humanize(stats.ops, COUNT) .. "/s"
@@ -811,7 +810,10 @@ end
 ---@return number time
 local function calibrate_stop(round_duration)
    -- Guard against division by zero for extremely fast functions on low-precision clocks.
-   local safe_duration = (round_duration > 0) and round_duration or get_min_clocktime()
+   local safe_duration = round_duration
+   if round_duration <= 0 then
+      safe_duration = get_min_clocktime()
+   end
    local time = math_max(config.rounds * safe_duration, config.time)
    local rounds = math_min(MAX_ROUNDS, math_ceil(time / safe_duration))
    return rounds, time
@@ -1169,7 +1171,10 @@ local function rank_results(results, param_names)
       end
 
       -- Use baseline median if specified, otherwise use fastest (first after sort)
-      local baseline_median = baseline_row and baseline_row.median or group[1].median
+      local baseline_median = group[1].median
+      if baseline_row then
+         baseline_median = baseline_row.median
+      end
 
       local first = group[1]
       if baseline_median > 0 then

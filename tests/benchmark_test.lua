@@ -90,9 +90,12 @@ for _, clock_name in ipairs(h.CLOCKS) do
 
             assert.are_equal("test_value", received_ctx.data)
             assert.are_equal("test_value", teardown_ctx.data)
+         end)
 
-            -- setup returning nil passes nil to fn and teardown
-            received_ctx, teardown_ctx = "sentinel", "sentinel"
+         test("setup returning nil passes nil to fn and teardown" .. suffix, function()
+            local benchmark = luamark[name]
+            local received_ctx, teardown_ctx = "sentinel", "sentinel"
+
             benchmark(function(ctx)
                received_ctx = ctx
             end, {
