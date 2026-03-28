@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.1.1] - 2026-03-28
+
+### Fixed
+
+- Parameterized results rendered as separate single-row tables instead of
+  grouped tables when results were deserialized (e.g. from subprocess or
+  engine benchmark paths).
+
 ## [v1.1.0] - 2026-03-16
 
 ### Added
@@ -194,7 +202,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release. LuaMark is a portable microbenchmarking library for Lua that
   precisely measures execution time and memory usage.
 
-[Unreleased]: https://github.com/jeffzi/luamark/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/jeffzi/luamark/compare/v1.1.1...HEAD
+[v1.1.1]: https://github.com/jeffzi/luamark/compare/v1.1.0...v1.1.1
 [v1.1.0]: https://github.com/jeffzi/luamark/compare/v1.0.2...v1.1.0
 [v1.0.2]: https://github.com/jeffzi/luamark/compare/v1.0.1...v1.0.2
 [v1.0.1]: https://github.com/jeffzi/luamark/compare/v1.0.0...v1.0.1
