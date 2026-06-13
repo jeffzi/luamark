@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Reset GC state before each timed benchmark to reduce inter-target
+  heap-order measurement bias in suite comparisons.
+
 ## [v1.1.1] - 2026-03-28
 
 ### Fixed

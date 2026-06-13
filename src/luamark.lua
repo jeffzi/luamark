@@ -1058,6 +1058,9 @@ local function single_benchmark(
    end
 
    if suspend_gc then
+      -- Two cycles: the first finalizes __gc objects, the second reclaims them.
+      collectgarbage("collect")
+      collectgarbage("collect")
       collectgarbage("stop")
    end
 
