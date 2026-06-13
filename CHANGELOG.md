@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.1.2] - 2026-06-13
+
 ### Fixed
 
 - Reset GC state before each timed benchmark to reduce inter-target
@@ -207,7 +209,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release. LuaMark is a portable microbenchmarking library for Lua that
   precisely measures execution time and memory usage.
 
-[Unreleased]: https://github.com/jeffzi/luamark/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/jeffzi/luamark/compare/v1.1.2...HEAD
+[v1.1.2]: https://github.com/jeffzi/luamark/compare/v1.1.1...v1.1.2
 [v1.1.1]: https://github.com/jeffzi/luamark/compare/v1.1.0...v1.1.1
 [v1.1.0]: https://github.com/jeffzi/luamark/compare/v1.0.2...v1.1.0
 [v1.0.2]: https://github.com/jeffzi/luamark/compare/v1.0.1...v1.0.2
