@@ -20,6 +20,6 @@
   "devDependencies": {
     "@biomejs/biome": "^2.4.4",
     "expect-type": "^1.0.0",
-    "typescript": "^5.4.0"
+    "typescript": "^6.0.2"
   }
 }

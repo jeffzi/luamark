@@ -45,7 +45,6 @@ luacov_report.html*
 
 # Node
 node_modules/
-package-lock.json
 
 # Playwright
 test-results/
