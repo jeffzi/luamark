@@ -10,7 +10,7 @@ jobs:
         include:
           - platform: x86_64-linux
             name: desktop
-          - platform: js-web
+          - platform: wasm-web
             name: html5
 
     name: ${{ matrix.name }}
@@ -48,23 +48,23 @@ jobs:
         run: dmengine_headless
 
       - name: Bundle html5
-        if: matrix.platform == 'js-web'
+        if: matrix.platform == 'wasm-web'
         run: >-
           java -jar "$BOB"
-          --platform js-web
+          --platform wasm-web
           bundle --bundle-output bundle
 
       - name: Setup Node.js
-        if: matrix.platform == 'js-web'
+        if: matrix.platform == 'wasm-web'
         uses: actions/setup-node@v6
         with:
           node-version: "22"
 
       - name: Install Playwright
-        if: matrix.platform == 'js-web'
+        if: matrix.platform == 'wasm-web'
         run: npm install playwright && npx playwright install --with-deps chromium
 
       - name: Run html5 headless test
-        if: matrix.platform == 'js-web'
+        if: matrix.platform == 'wasm-web'
         timeout-minutes: 5
         run: node test_html5.mjs
