@@ -241,4 +241,26 @@ describe("render", function()
       local _, name_header_count = output:gsub("Name", "")
       assert.are_equal(2, name_header_count)
    end)
+
+   test("plain format renders full-width bars when all medians are zero", function()
+      local results = {
+         h.make_result_row("a", 0, 1, 1),
+         h.make_result_row("b", 0, 2, 1),
+      }
+      local output = luamark.render(results)
+
+      -- Full-width bars should show multiple consecutive bar chars
+      assert.matches("██+", output)
+   end)
+
+   test("compact format renders full-width bars when all medians are zero", function()
+      local results = {
+         h.make_result_row("a", 0, 1, 1),
+         h.make_result_row("b", 0, 2, 1),
+      }
+      local output = luamark.render(results, true)
+
+      -- Full-width bars should show multiple consecutive bar chars
+      assert.matches("██+", output)
+   end)
 end)

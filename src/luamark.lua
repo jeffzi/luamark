@@ -550,8 +550,14 @@ local function render_bar_chart(rows, max_width)
    local lines = {}
    for i = 1, #rows do
       local row = rows[i]
-      -- Scale bar by median (smaller bar = less time = faster)
-      local bar_width = math_max(1, math_floor((row.median_value / max_median) * bar_max))
+      -- Scale bar by median (smaller bar = less time = faster).
+      -- When all medians are zero, treat as full-width (ratio = 1), mirroring
+      -- the relative = 1 guard for a zero baseline in rank_results.
+      local ratio = 1
+      if max_median > 0 then
+         ratio = row.median_value / max_median
+      end
+      local bar_width = math_max(1, math_floor(ratio * bar_max))
       local name = align_left(truncate_name(row.name, name_max), name_max)
       local bar = string.rep(BAR_CHAR, bar_width)
       lines[i] = string.format("%s  |%s %s (%s)", name, bar, row.relative, row.median)
@@ -596,9 +602,14 @@ local function render_plain_table(rows, widths, show_ops)
       local cells = {}
       for _, col in ipairs(visible_headers) do
          if col.name == "relative" then
-            -- Scale bar by median (smaller bar = less time = faster)
-            local bar_width =
-               math_max(1, math_floor((row.median_value / max_median) * EMBEDDED_BAR_WIDTH))
+            -- Scale bar by median (smaller bar = less time = faster).
+            -- When all medians are zero, treat as full-width (ratio = 1),
+            -- mirroring the relative = 1 guard for a zero baseline in rank_results.
+            local ratio = 1
+            if max_median > 0 then
+               ratio = row.median_value / max_median
+            end
+            local bar_width = math_max(1, math_floor(ratio * EMBEDDED_BAR_WIDTH))
             cells[#cells + 1] = align_left(
                build_relative_bar(row.relative, bar_width, max_relative_width),
                relative_bar_width
