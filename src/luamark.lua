@@ -411,11 +411,12 @@ end
 ---@param unit default_unit
 ---@return string
 local function format_median(median, margin, unit)
+   local median_str = humanize(median, unit)
    local margin_str = humanize(margin, unit)
    if margin_str:match("^0") then
-      return humanize(median, unit)
+      return median_str
    end
-   return humanize(median, unit) .. " ± " .. margin_str
+   return median_str .. " ± " .. margin_str
 end
 
 ---@param stats luamark.Stats
